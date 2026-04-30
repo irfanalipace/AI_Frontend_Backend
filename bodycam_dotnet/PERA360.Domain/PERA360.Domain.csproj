@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>PERA360.Domain</RootNamespace>
+    <AssemblyName>PERA360.Domain</AssemblyName>
+  </PropertyGroup>
+
+</Project>

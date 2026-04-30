@@ -1,0 +1,8 @@
+.env
+*.env
+bodycam_backend/.env
+bodycam_frontend/.env
+bodycam_frontend/node_modules
+bodycam_backend/.venv/
+bodycam_frontend/node_modules/.vite/deps
+bodycam_frontend/node_modules/.vite/

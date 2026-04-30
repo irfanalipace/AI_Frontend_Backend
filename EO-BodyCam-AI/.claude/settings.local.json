@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip cache:*)",
+      "Bash(rm -rf /c/Users/irfan/AppData/Local/Temp/pip-*)",
+      "Bash(rm -rf /c/Users/irfan/AppData/Local/Temp/torch_*)",
+      "Bash(rm -rf /c/Users/irfan/AppData/Local/Temp/tmp*)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('bodycam_backend/server.py', doraise=True\\); print\\('OK'\\)\")"
+    ]
+  }
+}

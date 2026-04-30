@@ -1,0 +1,15 @@
+{
+  "officer_id": "EO_001",
+  "enrollment_file": "/home/claude/eo_bodycam_project/audio_samples/enrollment_eo.wav",
+  "duration_seconds": 13.8,
+  "threshold": 0.88,
+  "enrolled_at": "2024-01-01",
+  "voiceprint_preview": {
+    "f0_mean": 143.42181159410484,
+    "f0_std": 15.496486222128096,
+    "rms": 0.1673412024974823,
+    "zcr": 0.0865162037037037,
+    "spectral_centroid": 1289.3932110647147,
+    "vector_dims": 106
+  }
+}

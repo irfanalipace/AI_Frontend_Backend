@@ -1,0 +1,3 @@
+2026-04-30T12:03:02.4979002Z
+Python pipeline returned 500: {"error":"Gemini transcription failed (key set but no response). Check Gemini quota, network, or audio length. Set GEMINI_REQUIRED=false in .env if you want to allow Google Speech fallback."}
+

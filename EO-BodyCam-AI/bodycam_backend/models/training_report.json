@@ -1,0 +1,145 @@
+{
+  "validation_results": [
+    {
+      "file": "eo_normal.wav",
+      "expected": "NORMAL",
+      "predicted": "NORMAL",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 1.0,
+        "HARSH": 0.0,
+        "ANGRY": 0.0,
+        "BRIBE_TONE": 0.0
+      }
+    },
+    {
+      "file": "eo_harsh.wav",
+      "expected": "HARSH",
+      "predicted": "HARSH",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 0.003,
+        "HARSH": 0.994,
+        "ANGRY": 0.002,
+        "BRIBE_TONE": 0.002
+      }
+    },
+    {
+      "file": "eo_bribe.wav",
+      "expected": "BRIBE_TONE",
+      "predicted": "BRIBE_TONE",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 0.001,
+        "HARSH": 0.001,
+        "ANGRY": 0.0,
+        "BRIBE_TONE": 0.999
+      }
+    },
+    {
+      "file": "eo_threat.wav",
+      "expected": "ANGRY",
+      "predicted": "ANGRY",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 0.015,
+        "HARSH": 0.008,
+        "ANGRY": 0.972,
+        "BRIBE_TONE": 0.005
+      }
+    },
+    {
+      "file": "enrollment_eo.wav",
+      "expected": "NORMAL",
+      "predicted": "NORMAL",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 1.0,
+        "HARSH": 0.0,
+        "ANGRY": 0.0,
+        "BRIBE_TONE": 0.0
+      }
+    },
+    {
+      "file": "customer_voice.wav",
+      "expected": "NORMAL",
+      "predicted": "NORMAL",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 0.996,
+        "HARSH": 0.001,
+        "ANGRY": 0.0,
+        "BRIBE_TONE": 0.003
+      }
+    },
+    {
+      "file": "shopkeeper_voice.wav",
+      "expected": "NORMAL",
+      "predicted": "NORMAL",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 0.999,
+        "HARSH": 0.0,
+        "ANGRY": 0.0,
+        "BRIBE_TONE": 0.001
+      }
+    },
+    {
+      "file": "market_scene_normal.wav",
+      "expected": "NORMAL",
+      "predicted": "NORMAL",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 0.999,
+        "HARSH": 0.0,
+        "ANGRY": 0.0,
+        "BRIBE_TONE": 0.001
+      }
+    },
+    {
+      "file": "market_scene_harsh.wav",
+      "expected": "HARSH",
+      "predicted": "HARSH",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 0.002,
+        "HARSH": 0.996,
+        "ANGRY": 0.002,
+        "BRIBE_TONE": 0.001
+      }
+    },
+    {
+      "file": "market_scene_bribe.wav",
+      "expected": "BRIBE_TONE",
+      "predicted": "BRIBE_TONE",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 0.001,
+        "HARSH": 0.001,
+        "ANGRY": 0.001,
+        "BRIBE_TONE": 0.997
+      }
+    },
+    {
+      "file": "market_scene_no_eo.wav",
+      "expected": "NORMAL",
+      "predicted": "NORMAL",
+      "correct": true,
+      "probabilities": {
+        "NORMAL": 1.0,
+        "HARSH": 0.0,
+        "ANGRY": 0.0,
+        "BRIBE_TONE": 0.0
+      }
+    }
+  ],
+  "cv_accuracy": 0.9969,
+  "classes": [
+    "NORMAL",
+    "HARSH",
+    "ANGRY",
+    "BRIBE_TONE"
+  ],
+  "fix": "NORMAL augmented to cover rms=0.02-0.20 matching real-world audio",
+  "validated_at": "2026-04-08 17:14:24"
+}
