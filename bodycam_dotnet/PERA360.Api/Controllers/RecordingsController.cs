@@ -33,4 +33,17 @@ public class RecordingsController : ControllerBase
     [HttpGet("stats")]
     public async Task<IActionResult> Stats(CancellationToken ct)
         => Ok(await _recordings.StatsAsync(ct));
+
+    /// <summary>
+    /// Removes a recording from MSSQL — cascade-deletes its AnalysisResult
+    /// + Violations rows in the same transaction. Returns 204 on success,
+    /// 404 if no row matched. The original media file (already moved to
+    /// WatchFolder/Processed/) is left on disk untouched.
+    /// </summary>
+    [HttpDelete("{id:long}")]
+    public async Task<IActionResult> Delete(long id, CancellationToken ct)
+    {
+        var deleted = await _recordings.DeleteAsync(id, ct);
+        return deleted ? NoContent() : NotFound();
+    }
 }

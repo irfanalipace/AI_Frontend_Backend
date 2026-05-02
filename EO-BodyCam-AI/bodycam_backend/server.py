@@ -656,26 +656,31 @@ def _gemini_transcribe(audio_path):
     urdu_text = ""
     english_text = ""
 
-    # Prompt 1: Urdu transcription with strict no-repetition instructions
+    # Single Gemini call returning BOTH the Urdu transcript and the Roman/
+    # English transliteration in one structured JSON response. Halves the
+    # network round-trips compared to the previous two-call flow — at the
+    # cost of a slightly larger response we have to parse defensively.
     try:
         payload = {
             "contents": [{"parts": [
                 {"text": (
-                    "You are a Pakistani Urdu transcription expert. "
-                    "Transcribe this audio EXACTLY ONCE as spoken in Urdu script. "
+                    "You are a Pakistani Urdu transcription expert. Listen to this "
+                    "police body-camera audio and return a SINGLE JSON object — "
+                    "no markdown, no code fences, no commentary — with exactly "
+                    "two fields:\n"
+                    "  \"urdu\":    the transcript in Urdu script (Urdu words in Urdu, "
+                    "             English words in English, standard punctuation ۔ ،)\n"
+                    "  \"english\": the same content as Roman Urdu / English "
+                    "             (e.g. 'rishwat', 'bakwas', 'chup raho')\n\n"
                     "CRITICAL RULES:\n"
-                    "1. DO NOT repeat phrases or words. Each phrase appears only once even if you're uncertain.\n"
-                    "2. DO NOT duplicate sentences. If unsure, transcribe it once only.\n"
-                    "3. Keep Urdu words in Urdu script, English words in English.\n"
-                    "4. Use standard punctuation (۔ ،).\n"
-                    "5. If audio has no clear speech, return ENTIRELY EMPTY — a blank string, not a note.\n"
-                    "6. Return ONLY the transcription text — no explanations, no markdown, no labels.\n"
-                    "7. Listen carefully - if the speaker says something once, write it once.\n"
-                    "8. NEVER output timestamps like '1:50 -' or '0:23'. Only the spoken words.\n"
-                    "9. NEVER output editor notes, parentheticals like '(repeated, but...)', "
-                    "'(I'll transcribe once)', '(unclear)', or any commentary ABOUT the transcription. "
-                    "If a section is unclear, just skip it silently.\n"
-                    "10. NEVER write about yourself, your process, or what you heard — only the words spoken."
+                    "1. Each phrase appears ONCE. Do not repeat or duplicate.\n"
+                    "2. NEVER output timestamps like '1:50 -' or '0:23'.\n"
+                    "3. NEVER output parentheticals like '(repeated)', '(unclear)', "
+                    "   '(I'll transcribe once)' or any commentary about the process.\n"
+                    "4. If a section is unclear, skip it silently.\n"
+                    "5. If there is NO clear speech in the audio, return "
+                    "{\"urdu\":\"\",\"english\":\"\"} — both empty strings.\n"
+                    "6. Return ONLY the JSON object, nothing before or after."
                 )},
                 {"inline_data": {"mime_type": "audio/wav", "data": audio_b64}}
             ]}],
@@ -684,6 +689,7 @@ def _gemini_transcribe(audio_path):
                 "maxOutputTokens": 8192,
                 "topK": 1,
                 "topP": 0.1,
+                "responseMimeType": "application/json",
             }
         }
         resp = None
@@ -697,92 +703,54 @@ def _gemini_transcribe(audio_path):
             if resp.status_code in (429, 503):
                 import time as _t
                 _t.sleep(2 + _attempt * 3)
-                print(f"  [gemini-ur] retry {_attempt+1}/3 (status {resp.status_code})", flush=True)
+                print(f"  [gemini-tx] retry {_attempt+1}/3 (status {resp.status_code})", flush=True)
                 continue
             break
+
         if resp and resp.status_code == 200:
             try:
-                text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                if text and len(text) > 1:
-                    # Clean repetitions (Gemini sometimes doubles phrases)
-                    cleaned = _remove_repetitions(text)
-                    if cleaned != text:
-                        print(f"  [gemini-ur] removed repetitions", flush=True)
-                    # Extra hallucination check
-                    if _detect_hallucination(cleaned):
-                        cleaned = _clean_hallucination(cleaned)
-                    # Strip LLM meta-commentary (timestamps, "(repeated...)" etc.) — crucial for video
-                    before_strip = cleaned
-                    cleaned = _strip_llm_commentary(cleaned)
-                    if cleaned != before_strip:
-                        print(f"  [gemini-ur] stripped LLM commentary", flush=True)
-                    urdu_text = cleaned
-                    if urdu_text:
-                        print(f"  [gemini-ur] {urdu_text[:200]}", flush=True)
-                    else:
-                        print(f"  [gemini-ur] empty after cleanup — will fallback", flush=True)
+                raw_text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
             except (KeyError, IndexError):
-                print(f"  [gemini-ur] empty response", flush=True)
-        else:
-            print(f"  Gemini Urdu error {resp.status_code}: {resp.text[:150]}", flush=True)
-    except Exception as e:
-        print(f"  Gemini Urdu error: {e}", flush=True)
+                raw_text = ""
+                print(f"  [gemini-tx] empty response", flush=True)
 
-    # Prompt 2: English translation (for keyword matching)
-    if urdu_text:
-        try:
-            payload = {
-                "contents": [{"parts": [
-                    {"text": (
-                        "Translate this audio to Roman Urdu / English. "
-                        "Write Urdu words in Roman letters (like 'rishwat', 'bakwas', 'chup raho'). "
-                        "DO NOT repeat phrases. Each phrase appears only once. "
-                        "Return ONLY the transliteration, no explanations.\n"
-                        "NEVER output timestamps, parentheticals like '(repeated)' or '(unclear)', "
-                        "or any commentary about the transcription process. "
-                        "If a section is unclear, skip it silently. "
-                        "If the audio has no clear speech, return an ENTIRELY EMPTY string."
-                    )},
-                    {"inline_data": {"mime_type": "audio/wav", "data": audio_b64}}
-                ]}],
-                "generationConfig": {
-                    "temperature": 0.0,
-                    "maxOutputTokens": 8192,
-                    "topK": 1,
-                    "topP": 0.1,
-                }
-            }
-            resp = None
-            for _attempt in range(3):
-                resp = requests.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}",
-                    json=payload, timeout=90
-                )
-                if resp.status_code == 200:
-                    break
-                if resp.status_code in (429, 503):
-                    import time as _t
-                    _t.sleep(2 + _attempt * 3)
-                    print(f"  [gemini-en] retry {_attempt+1}/3 (status {resp.status_code})", flush=True)
-                    continue
-                break
-            if resp and resp.status_code == 200:
+            # Defensive JSON parse — Gemini in JSON mode is reliable, but a
+            # malformed response should NOT lose us the whole transcription.
+            urdu_raw, english_raw = "", ""
+            if raw_text:
                 try:
-                    text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    if text and len(text) > 1:
-                        cleaned = _remove_repetitions(text)
-                        if _detect_hallucination(cleaned):
-                            cleaned = _clean_hallucination(cleaned)
-                        cleaned = _strip_llm_commentary(cleaned)
-                        english_text = cleaned
-                        if english_text:
-                            print(f"  [gemini-en] {english_text[:200]}", flush=True)
-                        else:
-                            print(f"  [gemini-en] empty after cleanup", flush=True)
-                except (KeyError, IndexError):
-                    pass
-        except Exception as e:
-            print(f"  Gemini English error: {e}", flush=True)
+                    j = json.loads(raw_text)
+                    urdu_raw    = (j.get("urdu")    or "").strip()
+                    english_raw = (j.get("english") or "").strip()
+                except Exception:
+                    # Fallback: treat the whole response as Urdu text.
+                    print(f"  [gemini-tx] JSON parse failed — treating as Urdu only", flush=True)
+                    urdu_raw = raw_text
+
+            def _clean(s):
+                if not s or len(s) <= 1:
+                    return ""
+                cleaned = _remove_repetitions(s)
+                if _detect_hallucination(cleaned):
+                    cleaned = _clean_hallucination(cleaned)
+                cleaned = _strip_llm_commentary(cleaned)
+                return cleaned
+
+            urdu_text    = _clean(urdu_raw)
+            english_text = _clean(english_raw)
+
+            if urdu_text:
+                print(f"  [gemini-tx ur] {urdu_text[:200]}", flush=True)
+            if english_text:
+                print(f"  [gemini-tx en] {english_text[:200]}", flush=True)
+            if not urdu_text and not english_text:
+                print(f"  [gemini-tx] empty after cleanup — will fallback", flush=True)
+        else:
+            status = resp.status_code if resp else 'no-response'
+            body   = resp.text[:150] if resp else ''
+            print(f"  Gemini transcribe error {status}: {body}", flush=True)
+    except Exception as e:
+        print(f"  Gemini transcribe error: {e}", flush=True)
 
     return urdu_text, english_text
 
@@ -903,6 +871,12 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
         "risk_score": 0-100,
         "severity": "NORMAL/WARNING/CRITICAL",
         "tone_label": "NORMAL/HARSH/ANGRY/BRIBE_TONE",
+        "tone_percents": {
+            "NORMAL": 0-100,
+            "HARSH": 0-100,
+            "ANGRY": 0-100,
+            "BRIBE_TONE": 0-100
+        },
         "is_flagged": true/false,
         "summary": "2-3 sentence summary of officer behavior",
         "recommended_action": "what action should be taken",
@@ -912,11 +886,61 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
     }
 }
 
-CRITICAL SCORING RULES — follow exactly so the database severity matches the score:
-- risk_score 0-29   → severity = "NORMAL"   (calm, professional, polite officer; no abuse, no shouting, no bribery hints)
-- risk_score 30-69  → severity = "WARNING"  (raised voice, mildly rude, dismissive, brief frustration, no slurs/threats/bribes)
-- risk_score 70-100 → severity = "CRITICAL" (shouting, slurs, threats, bribery hints, prolonged aggression)
-- tone_label MUST be one of NORMAL / HARSH / ANGRY / BRIBE_TONE — pick based on the dominant vocal character of the officer.
+The tone_percents MUST sum to 100 and reflect WHAT WAS HEARD (words + context).
+For lawful enforcement with no abuse: NORMAL >= 70, HARSH 0-30, ANGRY 0-10, BRIBE_TONE 0-5.
+For mild rudeness: HARSH 40-70, NORMAL 20-40, ANGRY 0-30, BRIBE_TONE 0-5.
+For hostile shouting/slurs: ANGRY 50-90, HARSH 10-40, NORMAL 0-20, BRIBE_TONE 0-5.
+For bribery hints: BRIBE_TONE 40-80, NORMAL 10-40, HARSH 5-30, ANGRY 0-20.
+
+SCORING RULES — this system monitors POLICE OFFICER MISCONDUCT. Lawful, firm
+enforcement is NOT misconduct. Be CONSERVATIVE. Default to NORMAL when unsure.
+
+WHAT COUNTS AS LAWFUL ENFORCEMENT (score NORMAL even if voice is loud/firm):
+- Sealing shops, removing encroachments, issuing fines/challans
+- Telling civilians to leave premises, close shops, wind up
+- Directing civilians to file applications at SDO/station
+- Following chain of command ("if SDO sahib says so, we comply")
+- Using polite markers like "please", "sir", "ji", "shukria", "thank you"
+- Repeating orders for clarity (officers must repeat in noisy environments)
+- Firm/projected voice — necessary to be heard across a shop or crowd
+
+WHAT COUNTS AS ACTUAL MISCONDUCT:
+- WARNING: dismissive sarcasm, mocking civilians, sustained rudeness, refusing
+           to identify oneself, ignoring civilian's lawful questions
+- CRITICAL: explicit slurs/profanity directed at civilians ("bakwas",
+            personal insults, gali); explicit threats of unlawful arrest,
+            beating, or detention; bribery language ("kuch de do", "paisy",
+            "chai pani", "deal kar lete hain", "samjhauta", "settle karo");
+            sustained hostile shouting >5s aimed at intimidation (NOT
+            commanding "bahar aaiye" loudly to be heard).
+
+SCORING BANDS:
+- risk_score 0-29   → "NORMAL"   — DEFAULT. Lawful enforcement, professional
+                                   conduct, polite or firm-but-civil tone.
+                                   Even loud commands during a sealing
+                                   operation belong here unless words show
+                                   hostility/abuse/bribery.
+- risk_score 30-69  → "WARNING"  — Mild rudeness, sarcasm, dismissive replies
+                                   to civilian questions, missing greeting
+                                   protocol. Words show some unprofessionalism
+                                   but no slurs/threats/bribes.
+- risk_score 70-100 → "CRITICAL" — At least ONE of: explicit slurs, explicit
+                                   threats of unlawful action, bribery
+                                   language, sustained hostile shouting with
+                                   intent to intimidate. Acoustic loudness
+                                   alone is NEVER enough.
+
+Do NOT inflate severity from acoustic features (loudness, pitch, speed). The
+audio's WORDS and INTENT determine severity. A police officer firmly directing
+shop closure during a legal enforcement operation is NORMAL — even at high
+volume.
+
+tone_label MUST be one of NORMAL / HARSH / ANGRY / BRIBE_TONE based on the
+WORDS HEARD (not just voice volume):
+- NORMAL: professional language, even if firm or loud (DEFAULT)
+- HARSH:  dismissive, sarcastic, or rude WORDS (not just loud voice)
+- ANGRY:  hostile WORDS, slurs, explicit threats
+- BRIBE_TONE: any bribery hint ("kuch de do", "settle karo", "chai pani", etc.)
 - keywords_detected: list every abusive word, threat, slur, or bribery hint you actually heard (or [] if none). Do NOT invent. Empty list when audio is normal.
 
 For `emotions.breakdown`, the eight values should roughly sum to 100 (they represent the relative proportion of each emotion heard). Rate purely from VOICE CUES (tone, pitch, volume, cadence) — not from the spoken words alone. If audio is unclear, set all to 0 and dominant = "neutral"."""
@@ -2469,6 +2493,36 @@ def run_analysis(audio, sr, officer_id="EO_001", source="upload", filename=""):
 
     analyze_audio = eo_audio if eo_detected and len(eo_audio) > sr * 0.3 else audio
 
+    # ─── Pre-submit Gemini full_analysis in parallel ──────────────────
+    # The structured Gemini analysis only needs the audio file — the
+    # transcript / tone_label / violations passed to it are HINTS, not
+    # required input. Submitting it now lets it run alongside the rest of
+    # the pipeline (transcription, tone classifier, keyword scan, greeting
+    # detection, diarization scoring) so wall-clock time becomes
+    # max(gemini_full_time, local_pipeline_time) instead of their sum.
+    # On a typical 2-min clip this saves ~30-50 seconds.
+    import soundfile as _sf_pre
+    from concurrent.futures import ThreadPoolExecutor as _TPEpre
+    gemini_full_future = None
+    gemini_full_tmp    = None
+    gemini_full_executor = None
+    try:
+        if _gemini_key():
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as _gf:
+                _sf_pre.write(_gf.name, analyze_audio[:sr * 300].astype(np.float32), sr)
+                gemini_full_tmp = _gf.name
+            gemini_full_executor = _TPEpre(max_workers=1)
+            # Empty hints — Gemini analyzes the audio directly. The prompt
+            # is self-contained for the audio-only pathway.
+            gemini_full_future = gemini_full_executor.submit(
+                _gemini_full_analysis,
+                gemini_full_tmp, "", "", [], {}, "ur", None,
+            )
+            print(f"  [gemini-full] kicked off in parallel ({len(analyze_audio)/sr:.1f}s of audio)", flush=True)
+    except Exception as _pre_e:
+        print(f"  [gemini-full] pre-submit failed: {_pre_e}", flush=True)
+        gemini_full_future = None
+
     print(f"  Transcribing ({len(analyze_audio)/sr:.1f}s)...", flush=True)
     transcript, transcription_method, transcript_urdu_only, transcript_english_only = auto_transcribe(analyze_audio, sr)
 
@@ -2553,35 +2607,40 @@ def run_analysis(audio, sr, officer_id="EO_001", source="upload", filename=""):
     # Behavior assessment
     behavior = assess_behavior(total_score, severity, tone_label, all_viols, transcript)
 
-    # AI-generated behavior assessment (Gemini) — text summary
-    ai_assessment = _gemini_assess_behavior(transcript, tone_label, all_viols, acoustics, greeting_info)
-
-    # Full structured Gemini analysis (transcription, vulgar, false, aggressive, bribery, overall)
-    import soundfile as _sf
+    # Wait for the parallel Gemini full_analysis we kicked off earlier.
+    # Usually completes BEFORE we reach this point (the local pipeline runs
+    # while it's in flight) — so the .result() call returns immediately.
+    # Worst case: we wait up to 180s for a slow Gemini response.
     gemini_analysis = {}
-    tmp_assess = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as _gf:
-            _sf.write(_gf.name, analyze_audio[:sr * 300].astype(np.float32), sr)
-            tmp_assess = _gf.name
-        gemini_analysis = _gemini_full_analysis(
-            tmp_assess, transcript, tone_label, all_viols, acoustics, language_hint="ur",
-            greeting_info=greeting_info,
-        )
-    except Exception as _e:
-        print(f"  Gemini full analysis wrapper error: {_e}", flush=True)
-    finally:
+    if gemini_full_future is not None:
         try:
-            if tmp_assess:
-                os.unlink(tmp_assess)
-        except Exception:
-            pass
+            _gem_t0 = time.time()
+            gemini_analysis = gemini_full_future.result(timeout=180) or {}
+            _gem_dt = time.time() - _gem_t0
+            print(f"  [gemini-full] returned after additional {_gem_dt:.1f}s wait "
+                  f"(0s = ran fully in parallel)", flush=True)
+        except Exception as _e:
+            print(f"  [gemini-full] parallel result error: {_e}", flush=True)
+            gemini_analysis = {}
+        finally:
+            if gemini_full_executor is not None:
+                try: gemini_full_executor.shutdown(wait=False)
+                except Exception: pass
+            if gemini_full_tmp:
+                try: os.unlink(gemini_full_tmp)
+                except Exception: pass
 
-    # If Gemini returned a richer summary, prefer it for the behavior paragraph
+    # Prefer the summary that came back with the structured analysis.
+    ai_assessment = ""
     if gemini_analysis:
         oa = gemini_analysis.get("overall_assessment", {}) or {}
-        if oa.get("summary") and not ai_assessment:
+        if oa.get("summary"):
             ai_assessment = oa["summary"]
+
+    # Only burn a second Gemini round-trip if we still have no narrative.
+    if not ai_assessment:
+        ai_assessment = _gemini_assess_behavior(
+            transcript, tone_label, all_viols, acoustics, greeting_info)
 
     # ── Gemini-authoritative scoring ───────────────────────────────────
     # The acoustic heuristics over-fire on phone/bodycam audio (every clip
@@ -2609,6 +2668,27 @@ def run_analysis(audio, sr, officer_id="EO_001", source="upload", filename=""):
         # Trust Gemini for tone label when it gave a valid one.
         if g_tone in ("NORMAL", "HARSH", "ANGRY", "BRIBE_TONE"):
             tone_label = g_tone
+
+        # Override the SVM acoustic-only tone bars with Gemini's word/context
+        # judgment. The SVM cannot tell "firm enforcement" from "angry abuse"
+        # — it only sees energy/pitch — so its 75% ANGRY on lawful sealing
+        # operations is misleading on the dashboard. Gemini hears the WORDS,
+        # so its tone breakdown is the one users should see.
+        g_tone_pct = oa.get("tone_percents") or {}
+        if isinstance(g_tone_pct, dict):
+            valid_keys = ("NORMAL", "HARSH", "ANGRY", "BRIBE_TONE")
+            picked = {k: float(g_tone_pct.get(k, 0) or 0) for k in valid_keys}
+            total = sum(picked.values())
+            if total > 0:
+                # Normalise to exactly 100 in case Gemini's numbers don't sum
+                # cleanly, then mirror into tone_proba (0-1 floats) which the
+                # legacy dashboard panels still read.
+                tone_percents = {k: int(round(v * 100.0 / total)) for k, v in picked.items()}
+                drift = 100 - sum(tone_percents.values())
+                if drift != 0:
+                    tone_percents[tone_label if tone_label in valid_keys else "NORMAL"] += drift
+                tone_proba = {k: round(tone_percents[k] / 100.0, 3) for k in valid_keys}
+                print(f"  [tone-override] Gemini tone bars: {tone_percents}", flush=True)
 
         # Capture Gemini's detected abusive/threat/bribe phrases for the response.
         if isinstance(g_kw, list):
@@ -2659,8 +2739,73 @@ def run_analysis(audio, sr, officer_id="EO_001", source="upload", filename=""):
     if score_source != "heuristic":
         print(f"  [score-rebase] {score_source}: heuristic={heuristic_total_score}/{heuristic_severity}/{heuristic_tone_label} -> gemini={total_score}/{severity}/{tone_label} ({len(gemini_keywords)} kw)", flush=True)
 
+        # When Gemini judged NORMAL but the heuristic created acoustic-only
+        # violations (LOUD_VOICE / PROLONGED_LOUD / HIGH_PITCH / AGITATION /
+        # HARSH_TONE) — those came from a firm enforcement voice, not from
+        # actual misconduct. Suppress them so the dashboard's "violations"
+        # list reflects WORDS, not loudness. Keyword violations from real
+        # abusive language are KEPT.
+        if severity == "NORMAL":
+            ACOUSTIC_ONLY_TYPES = {
+                "LOUD_VOICE", "PROLONGED_LOUD", "HIGH_PITCH", "EXTREME_PITCH",
+                "AGITATION", "HARSH_TONE", "ELEVATED_VOICE", "SHOUTING",
+            }
+            before = len(all_viols)
+            all_viols = [v for v in all_viols
+                         if str(v.get("type", "")).upper() not in ACOUSTIC_ONLY_TYPES]
+            removed = before - len(all_viols)
+            if removed > 0:
+                print(f"  [violations-filter] dropped {removed} acoustic-only "
+                      f"violation(s) because Gemini judged NORMAL "
+                      f"(words show no misconduct)", flush=True)
+                # Re-number the remaining violations so severity_label is consistent.
+                _sev_counters = {}
+                _raw_total = sum(int(v.get("score", 0) or 0) for v in all_viols)
+                _running_pct = 0.0
+                for i, v in enumerate(all_viols):
+                    sev = (v.get("severity") or "LOW").upper()
+                    _sev_counters[sev] = _sev_counters.get(sev, 0) + 1
+                    v["severity_index"] = _sev_counters[sev]
+                    v["severity_label"] = f"{sev} {_sev_counters[sev]}"
+                    raw = int(v.get("score", 0) or 0)
+                    if _raw_total > 0:
+                        if i == len(all_viols) - 1:
+                            pct = round(100.0 - _running_pct, 1)
+                        else:
+                            pct = round((raw / _raw_total) * 100.0, 1)
+                            _running_pct += pct
+                        v["impact_percent"] = pct
+                    else:
+                        v["impact_percent"] = 0.0
+                critical_count = _sev_counters.get("CRITICAL", 0)
+                high_count     = _sev_counters.get("HIGH", 0)
+                medium_count   = _sev_counters.get("MEDIUM", 0)
+                low_count      = _sev_counters.get("LOW", 0)
+    else:
+        # Heuristic-only path: cap at WARNING ceiling so we never CRITICAL-flag
+        # a clip we couldn't have Gemini judge. The acoustic detectors fire on
+        # normal speech (loud_frame_energy=0.20 catches mic compression peaks,
+        # agitation>2.0 fires on natural prosody) so >=70 here just means "we
+        # had no AI judgment", not "officer was abusive".
+        gemini_attempted = bool(_gemini_key())
+        if gemini_attempted and total_score >= CONFIG["critical_score"]:
+            capped = CONFIG["critical_score"] - 1   # 69 — top of WARNING band
+            print(f"  [score-cap] Gemini did not return a usable risk_score; "
+                  f"heuristic={total_score}/{severity} → capped to {capped}/WARNING. "
+                  f"Check Gemini logs above for parse/timeout errors.", flush=True)
+            total_score = capped
+            severity = "WARNING"
+        else:
+            print(f"  [score-source] heuristic-only path "
+                  f"(gemini_key_present={gemini_attempted}) score={total_score}/{severity}",
+                  flush=True)
+
     print(f"  Score:{total_score} tone={tone_score} kw={kw_score} -> {severity}", flush=True)
     print(f"  Emotion:{tone_label} Violations:{len(all_viols)} Rating:{behavior['overall_rating']}", flush=True)
+    _total_secs = time.time() - t0
+    print(f"  ⏱  TOTAL ANALYSIS TIME: {_total_secs:.1f}s "
+          f"(audio={total_dur:.1f}s, transcript={transcription_method}, "
+          f"score_source={score_source})", flush=True)
 
     incident_id = str(uuid.uuid4())[:8].upper()
     result = {
@@ -3349,6 +3494,16 @@ def _watch_worker():
 
 
 def start_watch_threads():
+    # The .NET backend runs its own VideoFolderWatcherService against
+    # bodycam_dotnet/WatchFolder/Inbox/ — that pipeline persists results to
+    # MSSQL and is the sole source of truth for the dashboard. Running the
+    # Python watcher in parallel double-processes every file (wasting Gemini
+    # quota) and only writes to an in-memory list that vanishes on restart.
+    # Set PYTHON_WATCH_ENABLED=true to opt back in for standalone Python use.
+    if os.environ.get("PYTHON_WATCH_ENABLED", "false").strip().lower() != "true":
+        print("[watch] Python watcher disabled — .NET WatchFolder is authoritative. "
+              "Set PYTHON_WATCH_ENABLED=true to re-enable.", flush=True)
+        return
     threading.Thread(target=_watch_scanner, name="watch-scanner", daemon=True).start()
     threading.Thread(target=_watch_worker,  name="watch-worker",  daemon=True).start()
 

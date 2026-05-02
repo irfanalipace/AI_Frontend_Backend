@@ -5,6 +5,7 @@ public interface IRecordingService
     Task<RecordingListResult> ListAsync(string? officerId, string? severity, int page, int pageSize, CancellationToken ct = default);
     Task<RecordingDetailResult?> DetailAsync(long id, CancellationToken ct = default);
     Task<RecordingStatsResult> StatsAsync(CancellationToken ct = default);
+    Task<bool> DeleteAsync(long id, CancellationToken ct = default);
 }
 
 public class RecordingListResult

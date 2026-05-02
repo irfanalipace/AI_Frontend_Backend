@@ -1,8 +1,22 @@
 .env
 *.env
+.env.*
+*.env.local
+.env.local
+.env.development
+.env.production
 bodycam_backend/.env
+bodycam_backend/.env.*
 bodycam_frontend/.env
+bodycam_frontend/.env.*
 bodycam_frontend/node_modules
 bodycam_backend/.venv/
 bodycam_frontend/node_modules/.vite/deps
 bodycam_frontend/node_modules/.vite/
+
+# Secret/credential files (any future variant)
+secrets.json
+*.secret
+*.secret.json
+credentials.json
+*.credentials.json

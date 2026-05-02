@@ -72,6 +72,29 @@ public class RecordingService : IRecordingService
         };
     }
 
+    public async Task<bool> DeleteAsync(long id, CancellationToken ct = default)
+    {
+        // Pull the recording with its analysis row + violation rows in one
+        // round-trip so EF Core can issue cascading DELETEs in a single
+        // SaveChanges. Returns false if nothing was found — the controller
+        // turns that into a 404.
+        var rec = await _db.Recordings
+            .Include(r => r.AnalysisResult)
+            .Include(r => r.Violations)
+            .FirstOrDefaultAsync(r => r.Id == id, ct);
+
+        if (rec is null) return false;
+
+        if (rec.AnalysisResult is not null)
+            _db.AnalysisResults.Remove(rec.AnalysisResult);
+        if (rec.Violations.Count > 0)
+            foreach (var v in rec.Violations) _db.Violations.Remove(v);
+        _db.Recordings.Remove(rec);
+
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<RecordingStatsResult> StatsAsync(CancellationToken ct = default)
     {
         var since = DateTime.UtcNow.AddDays(-30);

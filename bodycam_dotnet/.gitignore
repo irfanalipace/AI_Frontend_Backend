@@ -5,3 +5,22 @@ obj/
 .vs/
 .vscode/
 appsettings.*.local.json
+appsettings.Local.json
+appsettings.local.json
+appsettings.Development.local.json
+
+# Secret/credential files (any future variant)
+.env
+*.env
+.env.*
+secrets.json
+*.secret
+*.secret.json
+credentials.json
+*.credentials.json
+
+# Local watch folder data (don't commit user uploads / processing results)
+WatchFolder/Inbox/*
+WatchFolder/Processed/
+WatchFolder/Failed/
+!WatchFolder/Inbox/.gitkeep

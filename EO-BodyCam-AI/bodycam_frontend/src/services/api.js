@@ -79,12 +79,26 @@ export const ApiService = {
 
   // ── Watch-folder auto-analysis (drop video → backend analyzes) ────
   // Lightweight polls — short timeout so a stuck backend can never pile up.
+  // Legacy Python in-memory endpoints (kept for backwards compatibility, not
+  // used by the Video Analysis page anymore — it reads from MSSQL via .NET).
   watchStatus:  (opts = {})              => api.get('/api/watch/status',          { timeout: 10000, ...opts }),
   watchList:    (params = {}, opts = {}) => api.get('/api/watch/list',            { params, timeout: 10000, ...opts }),
   watchResult:  (fileId, opts = {})      => api.get(`/api/watch/result/${fileId}`,{ timeout: 15000, ...opts }),
   watchRescan:  ()                       => api.post('/api/watch/rescan',  null,  { timeout: 10000 }),
   watchDelete:  (fileId)                 => api.delete(`/api/watch/result/${fileId}`, { timeout: 10000 }),
   watchConfig:  (cfg)                    => api.post('/api/watch/config',  cfg,   { timeout: 10000 }),
+
+  // ── DB-backed (.NET) recordings + watch-folder status ─────────────
+  // Source of truth for the Video Analysis dashboard. Drop files into
+  // bodycam_dotnet/WatchFolder/Inbox/ and they flow through the same
+  // pipeline as /api/analyse — the result lives in dbo.recordings
+  // / dbo.analysis_results / dbo.violations and survives restarts.
+  dotnetWatchStatus:  (opts = {})              => dotnetApi.get('/api/watch-folder/status',  { timeout: 10000, ...opts }),
+  dotnetWatchTrigger: ()                       => dotnetApi.post('/api/watch-folder/trigger', null, { timeout: 10000 }),
+  dotnetRecordings:   (params = {}, opts = {}) => dotnetApi.get('/api/recordings',           { params, timeout: 15000, ...opts }),
+  dotnetRecording:    (id, opts = {})          => dotnetApi.get(`/api/recordings/${id}`,     { timeout: 15000, ...opts }),
+  dotnetRecordingStats: (opts = {})            => dotnetApi.get('/api/recordings/stats',     { timeout: 10000, ...opts }),
+  dotnetDeleteRecording: (id)                  => dotnetApi.delete(`/api/recordings/${id}`,  { timeout: 10000 }),
 }
 
 export default ApiService
