@@ -350,10 +350,26 @@ export default function VideoAnalysis() {
       `The original file in WatchFolder/Processed/ is kept.`
     )) return
     try {
-      await ApiService.dotnetDeleteRecording(item.recording_id)
+      const resp = await ApiService.dotnetDeleteRecording(item.recording_id)
+      console.log('[delete] OK', { id: item.recording_id, status: resp?.status })
       setItems(prev => prev.filter(x => x.file_id !== item.file_id))
-    } catch (_e) {
-      window.alert('Could not delete the recording — see browser console for details.')
+    } catch (e) {
+      // Show the real reason in the alert — most common cause is the .NET
+      // API still running the OLD binary (before the DELETE endpoint was
+      // added) → 404 / "Network Error". Also logs full error to console
+      // so we can see CORS preflight, body, etc.
+      console.error('[delete] FAILED', e)
+      const status = e?.response?.status
+      const body   = e?.response?.data
+      const url    = e?.config?.baseURL ? e.config.baseURL + e.config.url : (e?.config?.url || '')
+      const detail = status
+        ? `HTTP ${status} from ${url}\n${typeof body === 'string' ? body : JSON.stringify(body || {})}`
+        : `${e?.code || 'Network error'}: ${e?.message || 'unknown'}\nTarget: ${url}\n\n` +
+          `Most likely the .NET API is still running the OLD binary without the\n` +
+          `DELETE endpoint. Stop it (Ctrl+C in its terminal) and restart with:\n` +
+          `  cd c:/Projects/bodycam_dotnet\n` +
+          `  dotnet run --project PERA360.Api`
+      window.alert('Could not delete the recording.\n\n' + detail)
     }
   }
 
