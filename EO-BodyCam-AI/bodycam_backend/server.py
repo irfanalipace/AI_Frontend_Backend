@@ -914,6 +914,21 @@ WHAT COUNTS AS ACTUAL MISCONDUCT:
             sustained hostile shouting >5s aimed at intimidation (NOT
             commanding "bahar aaiye" loudly to be heard).
 
+  RETALIATION-FOR-RECORDING (always CRITICAL — civil liberty violation):
+  Any threat to identify, retaliate against, or punish civilians for recording
+  video / filing complaints / making FIR is CRITICAL even if delivered calmly.
+  Examples: "tinon pata lag jaye ga jeri video bana riyan" (I'll find out
+  who's recording), "video band kar" / "camera off karo" / "phone band kar"
+  (when said with threatening tone), "kis ne banaya" (who recorded this —
+  said as a threat), "naam bata kal milte hain" (tell me your name, see you
+  tomorrow), "ghar tak chod doon ga" (I'll follow you home).
+
+  PUNJABI/SARAIKI THREAT VARIANTS (always CRITICAL):
+  "lag jaye ga", "theek kar daon ga", "saza milni hai", "sabq sikha don ga",
+  "tujhe pata chal jayega", "main dekh laon ga", "phir milte hain", "kal
+  milte hain" — these mean "you'll face consequences / I'll teach you a
+  lesson / we'll see each other later" = full threat in regional dialect.
+
 SCORING BANDS:
 - risk_score 0-29   → "NORMAL"   — DEFAULT. Lawful enforcement, professional
                                    conduct, polite or firm-but-civil tone.
@@ -988,14 +1003,17 @@ For `emotions.breakdown`, the eight values should roughly sum to 100 (they repre
         ex_name = greeting_info.get("extracted_name") or "NOT PROVIDED"
         ex_station = greeting_info.get("extracted_station") or "NOT PROVIDED"
         greeting_block = (
-            f"\n\n**EO GREETING PROTOCOL COMPLIANCE (Officer self-identification):**\n"
+            f"\n\n**EO GREETING PROTOCOL COMPLIANCE (informational only):**\n"
             f"- Compliance: {compliance} ({g_score}/100)\n"
-            f"- Salam greeting: {'YES' if salam else 'NO (VIOLATION)'}\n"
-            f"- Officer name introduced: {'YES (' + ex_name + ')' if name_ok else 'NO (VIOLATION)'}\n"
-            f"- Station mentioned: {'YES (' + ex_station + ')' if station_ok else 'NO (VIOLATION)'}\n"
-            f"- Role/Designation stated: {'YES' if role_ok else 'NO (VIOLATION)'}\n"
-            f"NOTE: Per EO Protocol, officers MUST introduce themselves before citizen interaction. "
-            f"Failure to do so is an Officer violation (not Customer).\n"
+            f"- Salam greeting: {'YES' if salam else 'NO'}\n"
+            f"- Officer name introduced: {'YES (' + ex_name + ')' if name_ok else 'NO'}\n"
+            f"- Station mentioned: {'YES (' + ex_station + ')' if station_ok else 'NO'}\n"
+            f"- Role/Designation stated: {'YES' if role_ok else 'NO'}\n"
+            f"IMPORTANT: Missing greeting alone is NOT misconduct. Officers may "
+            f"legitimately skip introductions in time-critical situations (chasing "
+            f"suspects, breaking up fights, ongoing crime). Do NOT raise risk_score "
+            f"based on missing greeting. Only count actual misconduct: abusive words, "
+            f"threats, bribery language, sustained hostile shouting at civilians.\n"
         )
 
     parts = [{"text": system_prompt + "\n\n" + analysis_prompt + greeting_block}]
@@ -2549,19 +2567,15 @@ def run_analysis(audio, sr, officer_id="EO_001", source="upload", filename=""):
         greeting_info["voice_match"] = False
         greeting_info["identification_method"] = "unidentified"
 
-    # Add greeting compliance as a violation if MISSING
-    if greeting_info["greeting_compliance"] == "MISSING":
-        kw_viols.append({
-            "type":           "UNPROFESSIONAL",
-            "severity":       "MEDIUM",
-            "score":          10,
-            "label":          "No Greeting / Self-Introduction",
-            "description":    "Officer did not introduce themselves before the interaction",
-            "detail":         "EO Protocol: Officers must greet citizens and introduce themselves with name and station",
-            "keywords_found": [],
-            "source":         "greeting_detection",
-        })
-        kw_score = min(kw_score + 10, 100)
+    # Greeting compliance is INFORMATIONAL ONLY — not a misconduct violation.
+    # Officers may legitimately skip greeting in time-critical situations
+    # (chasing a fleeing suspect, breaking up a fight, ongoing crime). Lack
+    # of "Salam Aleikum" is NOT misconduct on its own. Real violations come
+    # only from: abusive language (gali), threats (dhamki), bribery
+    # (rishwat), power abuse, sustained hostile shouting, etc.
+    #
+    # The greeting panel still shows on the dashboard so supervisors can
+    # see compliance — but it does NOT contribute to the severity score.
 
     all_viols   = tone_viols + kw_viols
     total_score = min(tone_score + kw_score, 100)
@@ -2738,6 +2752,52 @@ def run_analysis(audio, sr, officer_id="EO_001", source="upload", filename=""):
 
     if score_source != "heuristic":
         print(f"  [score-rebase] {score_source}: heuristic={heuristic_total_score}/{heuristic_severity}/{heuristic_tone_label} -> gemini={total_score}/{severity}/{tone_label} ({len(gemini_keywords)} kw)", flush=True)
+
+        # ── False-positive suppression for ambiguous RISHWAT keywords ──
+        # The dictionary contains short generic words (e.g. "chhod", "jane do",
+        # "kar lete hain") that catch real bribery euphemisms BUT also match
+        # innocent enforcement phrases like "chhod dein apna saman" (leave
+        # your stuff). When Gemini's contextual judgment says NORMAL and the
+        # tone is NOT bribery, an ambiguous-keyword RISHWAT hit is almost
+        # certainly a false positive — drop it. Specific multi-word bribery
+        # phrases (e.g. "kuch de do", "deal kar lete hain", "chai pani",
+        # "paisy de do") are KEPT because they're unambiguous.
+        AMBIGUOUS_RISHWAT_KEYWORDS = {
+            "chhod", "chod", "chhod do", "chod do",
+            "jane do", "jaane do",
+            "kar lete hain", "kuch kar lete hain", "kuch kar lo",
+            "maaf kar do", "sulah kar lo", "kuch lay lo",
+            "baat ban jaye gi", "baat ban jayegi",
+            "tera kaam ho jayega", "kaam ban jayega",
+            "mujhe de de", "yahan rakh do",
+        }
+        if severity in ("NORMAL", "WARNING") and tone_label != "BRIBE_TONE":
+            before = len(all_viols)
+            filtered = []
+            for v in all_viols:
+                if str(v.get("type", "")).upper() == "RISHWAT":
+                    # Check whether the matched keywords are all in the ambiguous set
+                    matched_kws = v.get("keywords_found", []) or []
+                    all_ambiguous = all(
+                        str(kw).strip().lower() in AMBIGUOUS_RISHWAT_KEYWORDS
+                        for kw in matched_kws
+                    ) if matched_kws else True
+                    if all_ambiguous:
+                        print(f"  [rishwat-suppress] dropping false-positive RISHWAT "
+                              f"(ambiguous keywords {matched_kws} matched in lawful "
+                              f"enforcement context — Gemini judged {severity}, tone={tone_label})",
+                              flush=True)
+                        continue
+                filtered.append(v)
+            if len(filtered) != before:
+                all_viols = filtered
+                # Re-number violations for consistent display
+                _sev_counters = {}
+                for vv in all_viols:
+                    sv = (vv.get("severity") or "LOW").upper()
+                    _sev_counters[sv] = _sev_counters.get(sv, 0) + 1
+                    vv["severity_index"] = _sev_counters[sv]
+                    vv["severity_label"] = f"{sv} {_sev_counters[sv]}"
 
         # When Gemini judged NORMAL but the heuristic created acoustic-only
         # violations (LOUD_VOICE / PROLONGED_LOUD / HIGH_PITCH / AGITATION /
