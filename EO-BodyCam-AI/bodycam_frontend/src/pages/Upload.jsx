@@ -868,19 +868,23 @@ function GeminiAssessment({ assessment, analysis, greeting, violations }) {
         {(greetingMissing || greetingPartial) && (
           <div style={{ fontSize:'13px', color:'#1F2937', lineHeight:1.7,
             marginBottom:'14px',
-            background: greetingMissing ? '#FFF5F5' : '#FFFBEB',
+            background: '#F8FAFC',
             borderRadius:'8px', padding:'10px 14px',
-            borderLeft:`3px solid ${greetingMissing ? '#DC2626' : '#F59E0B'}` }}>
-            <span style={{ color: greetingMissing ? '#DC2626' : '#B45309', fontWeight:800 }}>
-              EO Greeting Protocol: {greetingMissing ? 'MISSING (Officer Violation)' : 'PARTIAL'} —{' '}
+            borderLeft:`3px solid #94A3B8` }}>
+            <span style={{ color: '#475569', fontWeight:800 }}>
+              EO Greeting Protocol: {greetingMissing ? 'MISSING' : 'PARTIAL'} —{' '}
             </span>
             The officer {greetingMissing ? 'did not' : 'only partially'} introduce themselves before the interaction
-            (score: {greeting.greeting_score}/100).{' '}
+            {/* (score: {greeting.greeting_score}/100)*/}.{' '} 
             {!greeting.salam_found && 'No Salam greeting. '}
             {!greeting.name_introduced && 'Name not stated. '}
             {!greeting.station_mentioned && 'Station not mentioned. '}
             {!greeting.role_mentioned && 'Role/designation not stated. '}
-            This is an <strong>Officer violation</strong> per EO self-identification protocol.
+            <em style={{ color:'#64748B', fontSize:'12px' }}>
+              (Informational only — missing greeting alone is not misconduct.
+              Officers may legitimately skip introductions in time-critical
+              situations.)
+            </em>
           </div>
         )}
 
@@ -1039,9 +1043,9 @@ function GreetingPanel({ greeting }) {
 
         {/* Compliance Badge */}
         <div style={{ textAlign:'right' }}>
-          <div style={{ fontSize:'24px', fontWeight:900, color:complianceColor, lineHeight:1 }}>
+          {/* <div style={{ fontSize:'24px', fontWeight:900, color:complianceColor, lineHeight:1 }}>
             {g.greeting_score}<span style={{ fontSize:'12px', color:'#64748B', fontWeight:600 }}>/100</span>
-          </div>
+          </div> */}
           <div style={{ fontSize:'10px', fontWeight:800, color:complianceColor,
             letterSpacing:'0.08em', marginTop:'2px', textTransform:'uppercase' }}>
             {g.greeting_compliance === 'FULL' ? 'Full Compliance' :

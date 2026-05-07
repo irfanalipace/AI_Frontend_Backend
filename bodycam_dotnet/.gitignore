@@ -4,6 +4,12 @@ obj/
 *.suo
 .vs/
 .vscode/
+# NEVER commit appsettings.json — contains Gemini API key + DB connection string.
+# Google's bots scan GitHub for AIza* keys and revoke them within minutes.
+# Each developer keeps their own local copy. A template lives at
+# appsettings.json.example with placeholder values.
+PERA360.Api/appsettings.json
+appsettings.json
 appsettings.*.local.json
 appsettings.Local.json
 appsettings.local.json
