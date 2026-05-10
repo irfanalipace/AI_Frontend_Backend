@@ -99,6 +99,8 @@ export const ApiService = {
   dotnetRecording:    (id, opts = {})          => dotnetApi.get(`/api/recordings/${id}`,     { timeout: 15000, ...opts }),
   dotnetRecordingStats: (opts = {})            => dotnetApi.get('/api/recordings/stats',     { timeout: 10000, ...opts }),
   dotnetDeleteRecording: (id)                  => dotnetApi.delete(`/api/recordings/${id}`,  { timeout: 10000 }),
+  dotnetOfficers:        (opts = {})            => dotnetApi.get('/api/officers',             { timeout: 10000, ...opts }),
+  dotnetOfficer:         (id, opts = {})        => dotnetApi.get(`/api/officers/${id}`,       { timeout: 10000, ...opts }),
 }
 
 export default ApiService

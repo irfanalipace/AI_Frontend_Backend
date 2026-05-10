@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────────
+# Python ML pipeline — Flask + SocketIO + Whisper + librosa + ffmpeg
+# Multi-arch: builds on x86_64 and ARM (Oracle Ampere A1).
+# ─────────────────────────────────────────────────────────────────
+FROM python:3.11-slim
+
+# System deps:
+#   ffmpeg   — audio extraction (videos → wav/mp3)
+#   libsndfile1 — required by soundfile
+#   build-essential — wheels that need compiling on ARM
+#   git — pip wheels occasionally need it
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libsndfile1 \
+        build-essential \
+        git \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python deps first so the layer caches when only code changes.
+COPY EO-BodyCam-AI/bodycam_backend/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /app/requirements.txt
+
+# Pre-download faster-whisper model so first request isn't slow.
+# Uses the "base" model (~140MB) — good balance of speed/accuracy on ARM.
+# Comment out if you want lazy load (faster build, slow first call).
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"  || true
+
+# Copy source last so code edits don't bust the deps layer.
+COPY EO-BodyCam-AI/bodycam_backend/ /app/
+
+# Models directory needs to be writable for runtime artifacts.
+RUN mkdir -p /app/models /app/voiceprints /app/data
+
+ENV PYTHONUNBUFFERED=1 \
+    PORT=5050 \
+    GEMINI_REQUIRED=false
+
+EXPOSE 5050
+
+# Run via eventlet — gunicorn isn't strictly required for a 1-worker
+# setup, and SocketIO handles its own concurrency. The existing
+# socketio.run() call in server.py is fine for this scale.
+CMD ["python", "server.py"]

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { ScoreRing, SeverityBadge, Spinner, SEV } from '../components/UI'
-import { ResultPanel } from './Upload'
+import IncidentDetailModal from '../components/IncidentDetailModal'
 import ApiService from '../services/api'
 
 /**
@@ -20,19 +20,21 @@ import ApiService from '../services/api'
  */
 
 const CARD = {
-  background: '#111827', border: '1px solid #1F2937',
-  borderRadius: '16px', padding: '18px', marginBottom: '14px',
+  background: 'linear-gradient(180deg, #111827 0%, #0F172A 100%)',
+  border: '1px solid rgba(51, 65, 85, 0.4)',
+  borderRadius: '16px', padding: '20px', marginBottom: '16px',
+  boxShadow: '0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.18)',
 }
 const LABEL = {
   fontSize: '10px', color: '#64748B', textTransform: 'uppercase',
-  letterSpacing: '0.08em', fontWeight: 700, marginBottom: '10px', display: 'block',
+  letterSpacing: '0.10em', fontWeight: 700, marginBottom: '10px', display: 'block',
 }
 
 const STATUS_COLOR = {
-  queued:    { fg: '#94A3B8', bg: 'rgba(148,163,184,0.10)', border: 'rgba(148,163,184,0.30)', label: 'QUEUED' },
-  analyzing: { fg: '#3B82F6', bg: 'rgba(59,130,246,0.12)',  border: 'rgba(59,130,246,0.35)',  label: 'ANALYZING' },
-  done:      { fg: '#10B981', bg: 'rgba(16,185,129,0.10)',  border: 'rgba(16,185,129,0.30)',  label: 'DONE' },
-  error:     { fg: '#EF4444', bg: 'rgba(239,68,68,0.10)',   border: 'rgba(239,68,68,0.30)',   label: 'ERROR' },
+  queued:    { fg: '#94A3B8', bg: 'rgba(148,163,184,0.10)', border: 'rgba(148,163,184,0.30)', glow: 'rgba(148,163,184,0.20)', label: 'QUEUED',    icon: '⏱' },
+  analyzing: { fg: '#60A5FA', bg: 'rgba(59,130,246,0.12)',  border: 'rgba(59,130,246,0.40)',  glow: 'rgba(59,130,246,0.30)',  label: 'ANALYZING', icon: '⟳' },
+  done:      { fg: '#34D399', bg: 'rgba(16,185,129,0.10)',  border: 'rgba(16,185,129,0.35)',  glow: 'rgba(16,185,129,0.25)',  label: 'DONE',      icon: '✓' },
+  error:     { fg: '#F87171', bg: 'rgba(239,68,68,0.10)',   border: 'rgba(239,68,68,0.35)',   glow: 'rgba(239,68,68,0.30)',   label: 'ERROR',     icon: '!' },
 }
 
 const formatBytes = (n) => {
@@ -128,8 +130,13 @@ export default function VideoAnalysis() {
   const [filter,    setFilter]    = useState('ALL')
   const [sevFilter, setSevFilter] = useState('ALL')
   const [busy,      setBusy]      = useState(false)
+  // Modal: holds the numeric recording_id of the row currently opened.
+  // Live ANALYZING / ERROR rows have no DB id yet — we show an inline
+  // toast for those instead of opening the rich modal.
   const [openId,    setOpenId]    = useState(null)
-  const [openData,  setOpenData]  = useState(null)
+  const [openToast, setOpenToast] = useState(null)
+  const [search,    setSearch]    = useState('')           // filename text search
+  const [sortBy,    setSortBy]    = useState('newest')     // newest | oldest | score | severity
 
   const inFlightRef = useRef(false)
   const abortRef    = useRef(null)
@@ -291,50 +298,24 @@ export default function VideoAnalysis() {
     finally { setBusy(false) }
   }
 
-  const openDetails = async (item) => {
-    setOpenId(item.file_id)
-    setOpenData(null)
+  // ── Open detail modal ─────────────────────────────────────────────
+  // For DB-backed rows we just hand the numeric recording_id to the
+  // shared IncidentDetailModal — it fetches its own data so this page
+  // no longer needs to know the .NET DTO shape.  Live ANALYZING /
+  // ERROR rows show a small toast instead.
+  const openDetails = (item) => {
     if (!item.recording_id) {
-      setOpenData({ error: item.error || 'No DB record yet — analysis still in progress.' })
+      setOpenToast({
+        filename: item.filename,
+        message: item.error || 'No DB record yet — analysis still in progress.',
+      })
+      window.setTimeout(() => setOpenToast(null), 3500)
       return
     }
-    try {
-      const r = await ApiService.dotnetRecording(item.recording_id)
-      const detail = r.data
-      const ar = detail?.analysisResult || {}
-
-      // The Python pipeline stores its full snake_case JSON in RawJson;
-      // ResultPanel was written against that shape, so we parse it back
-      // out and feed it in directly. Falls back to a minimal object built
-      // from the flat columns if RawJson is missing.
-      let result = null
-      if (ar.rawJson) {
-        try { result = JSON.parse(ar.rawJson) } catch (_) { result = null }
-      }
-      if (!result) {
-        result = {
-          severity:           ar.severity,
-          total_score:        ar.totalScore,
-          tone_score:         ar.toneScore,
-          keyword_score:      ar.kwScore,
-          tone_label:         ar.toneLabel,
-          transcript:         ar.transcriptUrdu,
-          transcription_method: ar.transcriptionMethod,
-          media_type:         detail.mediaType,
-          violations:         detail.violations || [],
-        }
-      }
-      setOpenData({
-        filename: detail.filename,
-        status:   'done',
-        result,
-      })
-    } catch (_e) {
-      setOpenData({ error: 'Could not fetch full result' })
-    }
+    setOpenId(item.recording_id)
   }
 
-  const closeDetails = () => { setOpenId(null); setOpenData(null) }
+  const closeDetails = () => setOpenId(null)
 
   const remove = async (item, e) => {
     e?.stopPropagation()
@@ -373,10 +354,69 @@ export default function VideoAnalysis() {
     }
   }
 
-  const visible = items.filter(i =>
-    (filter === 'ALL' || i.status === filter) &&
-    (sevFilter === 'ALL' || (i.severity || '') === sevFilter)
-  )
+  // Filter by status, severity, and search text (filename match)
+  const filtered = items.filter(i => {
+    if (filter !== 'ALL' && i.status !== filter) return false
+    if (sevFilter !== 'ALL' && (i.severity || '') !== sevFilter) return false
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      const fn = (i.filename || '').toLowerCase()
+      const off = (i.officer_name || i.officer_id || '').toLowerCase()
+      if (!fn.includes(q) && !off.includes(q)) return false
+    }
+    return true
+  })
+
+  // Sort the filtered items per user choice
+  const sevRank = { CRITICAL: 0, WARNING: 1, NORMAL: 2, '': 3 }
+  const visible = [...filtered].sort((a, b) => {
+    if (sortBy === 'newest') {
+      return (b.finished_at || b.started_at || 0) - (a.finished_at || a.started_at || 0)
+    }
+    if (sortBy === 'oldest') {
+      return (a.finished_at || a.started_at || 0) - (b.finished_at || b.started_at || 0)
+    }
+    if (sortBy === 'score') {
+      return (b.total_score ?? 0) - (a.total_score ?? 0)
+    }
+    if (sortBy === 'severity') {
+      return (sevRank[a.severity || ''] ?? 99) - (sevRank[b.severity || ''] ?? 99)
+    }
+    return 0
+  })
+
+  // Group items by recency for visual headers
+  const now = Date.now() / 1000
+  const groupOf = (i) => {
+    const ts = i.finished_at || i.started_at || i.queued_at
+    if (!ts) return 'Older'
+    const ageH = (now - ts) / 3600
+    if (ageH < 12) return 'Today'
+    if (ageH < 36) return 'Yesterday'
+    if (ageH < 24 * 7) return 'This Week'
+    return 'Older'
+  }
+  const grouped = (sortBy === 'newest' || sortBy === 'oldest')
+    ? visible.reduce((acc, item) => {
+        const g = groupOf(item)
+        if (!acc[g]) acc[g] = []
+        acc[g].push(item)
+        return acc
+      }, {})
+    : null  // No grouping when sorted by score/severity
+
+  // Counts for filter pill badges
+  const statusCounts = items.reduce((a, i) => {
+    a[i.status] = (a[i.status] || 0) + 1
+    a.ALL = (a.ALL || 0) + 1
+    return a
+  }, {})
+  const sevFilterCounts = items.reduce((a, i) => {
+    const k = i.severity || ''
+    if (k) a[k] = (a[k] || 0) + 1
+    a.ALL = (a.ALL || 0) + 1
+    return a
+  }, {})
 
   const counts = status?.counts || {}
   const sevCounts = items.reduce((acc, i) => {
@@ -386,99 +426,182 @@ export default function VideoAnalysis() {
   }, {})
 
   return (
-    <div style={{ padding:'30px', maxWidth:'1400px' }}>
+    <div style={{ padding:'32px 36px', maxWidth:'1440px' }}>
+      {/* Inline animation styles — keeps the page self-contained */}
+      <style>{`
+        @keyframes va-fadeIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform: translateY(0); } }
+        @keyframes va-pulse  { 0%,100% { opacity:0.5; } 50% { opacity:1; } }
+        @keyframes va-slideUp { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: translateY(0); } }
+        .va-card-anim { animation: va-slideUp .35s cubic-bezier(0.4, 0, 0.2, 1) both; }
+        .va-fade { animation: va-fadeIn .25s ease-out both; }
+      `}</style>
 
-      {/* Header */}
-      <div style={{ marginBottom:'20px' }}>
-        <h1 style={{ fontSize:'24px', fontWeight:800, color:'#F1F5F9',
-          margin:'0 0 6px', letterSpacing:'-0.02em' }}>
-          Video Analysis · Auto Watch Folder
-        </h1>
-        <p style={{ fontSize:'13px', color:'#64748B', lineHeight:1.6, margin:0 }}>
-          Drop any video / audio file into the watch folder below — the .NET
-          server detects it automatically, extracts audio, runs Gemini analysis,
-          and persists the result to MSSQL. The list below is read straight from
-          the DB and survives restarts.
+      {/* Header — refined gradient title */}
+      <div style={{ marginBottom:'24px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'8px' }}>
+          <div style={{
+            width:'4px', height:'28px', borderRadius:'4px',
+            background:'linear-gradient(180deg, #60A5FA, #6366F1)',
+            boxShadow:'0 0 12px rgba(96,165,250,0.5)',
+          }}/>
+          <h1 style={{ fontSize:'26px', fontWeight:800,
+            background:'linear-gradient(135deg, #F1F5F9 0%, #94A3B8 100%)',
+            WebkitBackgroundClip:'text', backgroundClip:'text',
+            WebkitTextFillColor:'transparent',
+            margin:0, letterSpacing:'-0.025em' }}>
+            Video Analysis
+          </h1>
+          <span style={{
+            fontSize:'10px', fontWeight:700, color:'#60A5FA',
+            background:'rgba(96,165,250,0.10)', border:'1px solid rgba(96,165,250,0.25)',
+            padding:'4px 10px', borderRadius:'6px', letterSpacing:'0.08em',
+          }}>
+            AUTO WATCH FOLDER
+          </span>
+        </div>
+        <p style={{ fontSize:'13px', color:'#64748B', lineHeight:1.7,
+          margin:'0 0 0 16px', maxWidth:'920px' }}>
+          Drop any video or audio file into the watch folder below — the system detects
+          it automatically, extracts audio, runs Gemini AI analysis, and persists results
+          to MSSQL. The list below is read straight from the database and survives restarts.
         </p>
       </div>
 
-      {/* Watcher status banner */}
-      <div style={{ ...CARD,
+      {/* Watcher status banner — premium gradient + glassmorphism */}
+      <div style={{
+        position:'relative', overflow:'hidden',
         background: status?._offline
-          ? 'rgba(239,68,68,0.06)'
-          : 'linear-gradient(135deg, rgba(59,130,246,0.06), rgba(16,185,129,0.04))',
+          ? 'linear-gradient(135deg, rgba(239,68,68,0.08) 0%, rgba(15,23,42,0.4) 100%)'
+          : 'linear-gradient(135deg, rgba(59,130,246,0.10) 0%, rgba(16,185,129,0.05) 50%, rgba(15,23,42,0.4) 100%)',
         border: status?._offline
           ? '1px solid rgba(239,68,68,0.25)'
-          : '1px solid rgba(59,130,246,0.2)' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }}>
-          <div style={{ width:42, height:42, borderRadius:'12px',
-            background: status?._offline ? '#1F2937'
-                        : status?.running ? 'linear-gradient(135deg, #10B981, #059669)'
-                        : '#1F2937',
+          : '1px solid rgba(96,165,250,0.20)',
+        borderRadius:'20px', padding:'22px 24px', marginBottom:'18px',
+        boxShadow:'0 1px 0 rgba(255,255,255,0.04) inset, 0 12px 32px rgba(0,0,0,0.20)',
+      }}>
+        {/* Subtle decorative glow */}
+        <div style={{
+          position:'absolute', top:'-50%', right:'-10%', width:'400px', height:'400px',
+          background: status?._offline
+            ? 'radial-gradient(circle, rgba(239,68,68,0.10) 0%, transparent 70%)'
+            : 'radial-gradient(circle, rgba(96,165,250,0.10) 0%, transparent 70%)',
+          pointerEvents:'none', filter:'blur(40px)',
+        }}/>
+
+        <div style={{ display:'flex', alignItems:'center', gap:'16px',
+          flexWrap:'wrap', position:'relative' }}>
+          <div style={{ width:'48px', height:'48px', borderRadius:'14px',
+            background: status?._offline
+              ? 'linear-gradient(135deg, #1F2937, #0F172A)'
+              : status?.running
+                ? 'linear-gradient(135deg, #10B981, #059669)'
+                : 'linear-gradient(135deg, #475569, #334155)',
             display:'flex', alignItems:'center', justifyContent:'center',
-            fontSize:'18px', fontWeight:800, color:'#fff',
-            boxShadow:'0 4px 12px rgba(16,185,129,0.25)' }}>
+            fontSize:'20px', fontWeight:800, color:'#fff',
+            boxShadow: status?.running && !status?._offline
+              ? '0 6px 16px rgba(16,185,129,0.35), 0 0 0 1px rgba(16,185,129,0.20)'
+              : '0 4px 10px rgba(0,0,0,0.30)',
+            animation: status?.running && !status?._offline ? 'pulse 2s ease-in-out infinite' : 'none',
+          }}>
             {status?._offline ? '✕' : status?.running ? '●' : '○'}
           </div>
-          <div style={{ flex:1, minWidth:'260px' }}>
-            <div style={{ fontSize:'13px', fontWeight:700, color:'#F1F5F9', marginBottom:'2px' }}>
+          <div style={{ flex:1, minWidth:'280px' }}>
+            <div style={{ fontSize:'14px', fontWeight:700, color:'#F1F5F9',
+              marginBottom:'4px', letterSpacing:'-0.01em' }}>
               {status?._offline ? '.NET API offline' :
                 status?.running ? 'Watcher running' : 'Watcher disabled'}
             </div>
-            <div style={{ fontSize:'11px', color:'#64748B', wordBreak:'break-all' }}>
+            <div style={{ fontSize:'11px', color:'#64748B', wordBreak:'break-all',
+              fontFamily:'ui-monospace, "SF Mono", Menlo, monospace' }}>
               {status?.folder || 'bodycam_dotnet/WatchFolder/Inbox/'}
             </div>
           </div>
-          <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
             <KPI label="Total"     value={counts.total ?? 0}     color="#94A3B8"/>
             <KPI label="In Queue"  value={counts.queued ?? 0}    color="#94A3B8"/>
-            <KPI label="Analyzing" value={counts.analyzing ?? 0} color="#3B82F6"/>
-            <KPI label="Done"      value={counts.done ?? 0}      color="#10B981"/>
-            <KPI label="Errors"    value={counts.error ?? 0}     color="#EF4444"/>
+            <KPI label="Analyzing" value={counts.analyzing ?? 0} color="#60A5FA"/>
+            <KPI label="Done"      value={counts.done ?? 0}      color="#34D399"/>
+            <KPI label="Errors"    value={counts.error ?? 0}     color="#F87171"/>
           </div>
           <button onClick={rescan} disabled={busy}
-            style={{ padding:'10px 16px', borderRadius:'10px', fontSize:'12px',
-              fontWeight:700, color:'#fff',
-              background: busy ? '#1F2937' : 'linear-gradient(135deg, #3B82F6, #6366F1)',
+            onMouseEnter={e => !busy && (e.currentTarget.style.transform = 'translateY(-1px)')}
+            onMouseLeave={e => !busy && (e.currentTarget.style.transform = 'translateY(0)')}
+            style={{ padding:'11px 18px', borderRadius:'12px', fontSize:'12px',
+              fontWeight:700, color:'#fff', letterSpacing:'0.02em',
+              background: busy
+                ? 'linear-gradient(135deg, #1F2937, #0F172A)'
+                : 'linear-gradient(135deg, #3B82F6 0%, #6366F1 50%, #8B5CF6 100%)',
               border:'none', cursor: busy ? 'not-allowed' : 'pointer',
-              display:'flex', alignItems:'center', gap:'8px' }}>
+              display:'flex', alignItems:'center', gap:'8px',
+              boxShadow: busy ? 'none' : '0 6px 16px rgba(99,102,241,0.30)',
+              transition:'all .2s' }}>
             {busy ? <Spinner size={12} color="#fff"/> : '↻'}
             Rescan now
           </button>
         </div>
         {status?.last_scan ? (
-          <div style={{ marginTop:'10px', fontSize:'10px', color:'#475569',
-            display:'flex', gap:'14px', flexWrap:'wrap' }}>
-            <span>Last scan: {formatAgo(status.last_scan)}</span>
-            <span>Interval: every {status.scan_every || 5}s</span>
-            <span>Default officer: {status.default_officer_id || 'EO000'}</span>
-            {status.done_folder && <span>Done folder: {status.done_folder}</span>}
+          <div style={{ marginTop:'14px', paddingTop:'12px',
+            borderTop:'1px solid rgba(51,65,85,0.30)',
+            fontSize:'10px', color:'#64748B',
+            display:'flex', gap:'18px', flexWrap:'wrap',
+            position:'relative' }}>
+            <span>⏱ Last scan: <strong style={{ color:'#94A3B8' }}>{formatAgo(status.last_scan)}</strong></span>
+            <span>🔄 Interval: every <strong style={{ color:'#94A3B8' }}>{status.scan_every || 5}s</strong></span>
+            <span>👮 Default officer: <strong style={{ color:'#94A3B8' }}>{status.default_officer_id || 'EO000'}</strong></span>
+            {status.done_folder && <span style={{ wordBreak:'break-all' }}>📁 Done: <strong style={{ color:'#94A3B8' }}>{status.done_folder}</strong></span>}
           </div>
         ) : null}
       </div>
 
-      {/* Severity breakdown */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'10px',
-        marginBottom:'14px' }}>
+      {/* Severity breakdown — premium tile design with icons */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'12px',
+        marginBottom:'18px' }}>
         {[
-          { sev:'CRITICAL', count: sevCounts.CRITICAL || 0 },
-          { sev:'WARNING',  count: sevCounts.WARNING  || 0 },
-          { sev:'NORMAL',   count: sevCounts.NORMAL   || 0 },
-          { sev:'PENDING',  count: sevCounts.PENDING  || 0 },
+          { sev:'CRITICAL', count: sevCounts.CRITICAL || 0, icon:'⚠', label:'Critical' },
+          { sev:'WARNING',  count: sevCounts.WARNING  || 0, icon:'⚡', label:'Warning'  },
+          { sev:'NORMAL',   count: sevCounts.NORMAL   || 0, icon:'✓',  label:'Normal'   },
+          { sev:'PENDING',  count: sevCounts.PENDING  || 0, icon:'⏱',  label:'Pending'  },
         ].map(s => {
           const cfg = SEV[s.sev] || SEV.NORMAL
           const isPending = s.sev === 'PENDING'
           return (
             <div key={s.sev} style={{
-              background: isPending ? '#111827' : cfg.bg,
-              border: isPending ? '1px solid #1F2937' : `1px solid ${cfg.border}`,
-              borderRadius:'14px', padding:'16px' }}>
-              <div style={{ fontSize:'10px', color:'#64748B', textTransform:'uppercase',
-                fontWeight:700, letterSpacing:'0.08em', marginBottom:'6px' }}>
-                {s.sev}
+              position:'relative', overflow:'hidden',
+              background: isPending
+                ? 'linear-gradient(180deg, #111827 0%, #0F172A 100%)'
+                : `linear-gradient(180deg, ${cfg.bg} 0%, rgba(15,23,42,0.4) 100%)`,
+              border: isPending ? '1px solid rgba(51,65,85,0.40)' : `1px solid ${cfg.border}`,
+              borderRadius:'16px', padding:'18px 20px',
+              boxShadow:'0 1px 0 rgba(255,255,255,0.04) inset, 0 4px 12px rgba(0,0,0,0.15)',
+              transition:'all .25s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 1px 0 rgba(255,255,255,0.04) inset, 0 12px 24px rgba(0,0,0,0.25)'; }}
+            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)';     e.currentTarget.style.boxShadow = '0 1px 0 rgba(255,255,255,0.04) inset, 0 4px 12px rgba(0,0,0,0.15)'; }}>
+              {/* Decorative glow */}
+              {!isPending && (
+                <div style={{
+                  position:'absolute', top:'-30px', right:'-30px',
+                  width:'120px', height:'120px',
+                  background:`radial-gradient(circle, ${cfg.bg} 0%, transparent 70%)`,
+                  pointerEvents:'none', filter:'blur(20px)',
+                }}/>
+              )}
+              <div style={{ display:'flex', alignItems:'center',
+                justifyContent:'space-between', marginBottom:'10px',
+                position:'relative' }}>
+                <div style={{ fontSize:'10px',
+                  color: isPending ? '#64748B' : cfg.text, opacity: isPending ? 1 : 0.85,
+                  textTransform:'uppercase', fontWeight:800, letterSpacing:'0.10em' }}>
+                  {s.sev}
+                </div>
+                <div style={{ fontSize:'14px',
+                  color: isPending ? '#475569' : cfg.text, opacity:0.6 }}>
+                  {s.icon}
+                </div>
               </div>
-              <div style={{ fontSize:'26px', fontWeight:900,
-                color: isPending ? '#94A3B8' : cfg.text }}>
+              <div style={{ fontSize:'32px', fontWeight:900,
+                color: isPending ? '#94A3B8' : cfg.text,
+                position:'relative', lineHeight:1, letterSpacing:'-0.025em' }}>
                 {s.count}
               </div>
             </div>
@@ -486,38 +609,202 @@ export default function VideoAnalysis() {
         })}
       </div>
 
-      {/* Filter row */}
-      <div style={{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }}>
-        {['ALL', 'analyzing', 'done', 'error'].map(f => (
-          <FilterPill key={f} label={f.toUpperCase()} active={filter === f}
-            onClick={() => setFilter(f)}/>
-        ))}
-        <span style={{ width:'1px', background:'#1F2937', margin:'0 4px' }}/>
-        {['ALL', 'CRITICAL', 'WARNING', 'NORMAL'].map(f => (
-          <FilterPill key={f} label={f} active={sevFilter === f}
-            onClick={() => setSevFilter(f)}/>
-        ))}
+      {/* Search + Sort row */}
+      <div style={{ display:'flex', gap:'10px', marginBottom:'12px',
+        flexWrap:'wrap', alignItems:'center' }}>
+        {/* Search input */}
+        <div style={{ flex:1, minWidth:'240px', position:'relative' }}>
+          <span style={{
+            position:'absolute', left:'12px', top:'50%',
+            transform:'translateY(-50%)', fontSize:'14px',
+            color:'#64748B', pointerEvents:'none',
+          }}>🔍</span>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by filename or officer ID…"
+            style={{
+              width:'100%', padding:'10px 12px 10px 36px',
+              borderRadius:'12px', fontSize:'12px',
+              background:'rgba(11,15,26,0.60)',
+              border:'1px solid rgba(51,65,85,0.40)',
+              color:'#F1F5F9', outline:'none',
+              transition:'all .2s',
+            }}
+            onFocus={e => { e.currentTarget.style.borderColor = 'rgba(96,165,250,0.50)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(96,165,250,0.15)' }}
+            onBlur={e => { e.currentTarget.style.borderColor = 'rgba(51,65,85,0.40)'; e.currentTarget.style.boxShadow = 'none' }}
+          />
+          {search && (
+            <button onClick={() => setSearch('')}
+              style={{
+                position:'absolute', right:'8px', top:'50%',
+                transform:'translateY(-50%)',
+                background:'rgba(51,65,85,0.40)', border:'none',
+                color:'#94A3B8', cursor:'pointer',
+                width:'22px', height:'22px', borderRadius:'6px',
+                fontSize:'11px', display:'flex',
+                alignItems:'center', justifyContent:'center',
+              }}>✕</button>
+          )}
+        </div>
+
+        {/* Sort dropdown */}
+        <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+          <span style={{ fontSize:'9px', color:'#475569', fontWeight:700,
+            textTransform:'uppercase', letterSpacing:'0.10em' }}>
+            Sort
+          </span>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            style={{
+              padding:'10px 32px 10px 12px',
+              borderRadius:'10px', fontSize:'11px', fontWeight:700,
+              background:'rgba(11,15,26,0.60)',
+              border:'1px solid rgba(51,65,85,0.40)',
+              color:'#CBD5E1', cursor:'pointer', outline:'none',
+              appearance:'none', WebkitAppearance:'none',
+              backgroundImage:`url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>")`,
+              backgroundRepeat:'no-repeat', backgroundPosition:'right 10px center',
+              backgroundSize:'10px',
+            }}>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="score">Score (high → low)</option>
+            <option value="severity">Severity (CRITICAL first)</option>
+          </select>
+        </div>
       </div>
 
-      {/* Cards */}
+      {/* Filter pills row — with live counts */}
+      <div style={{ display:'flex', gap:'8px', marginBottom:'18px', flexWrap:'wrap',
+        alignItems:'center' }}>
+        <span style={{ fontSize:'9px', color:'#475569', fontWeight:700,
+          textTransform:'uppercase', letterSpacing:'0.10em', marginRight:'4px' }}>
+          Status
+        </span>
+        {['ALL', 'analyzing', 'done', 'error'].map(f => (
+          <FilterPill key={f}
+            label={f.toUpperCase()}
+            count={f === 'ALL' ? items.length : (statusCounts[f] || 0)}
+            active={filter === f}
+            onClick={() => setFilter(f)}/>
+        ))}
+        <span style={{ width:'1px', height:'22px',
+          background:'linear-gradient(180deg, transparent, #334155, transparent)',
+          margin:'0 8px' }}/>
+        <span style={{ fontSize:'9px', color:'#475569', fontWeight:700,
+          textTransform:'uppercase', letterSpacing:'0.10em', marginRight:'4px' }}>
+          Severity
+        </span>
+        {['ALL', 'CRITICAL', 'WARNING', 'NORMAL'].map(f => (
+          <FilterPill key={f}
+            label={f}
+            count={f === 'ALL' ? items.length : (sevFilterCounts[f] || 0)}
+            active={sevFilter === f}
+            onClick={() => setSevFilter(f)}/>
+        ))}
+        {/* Active filter indicator */}
+        {(filter !== 'ALL' || sevFilter !== 'ALL' || search) && (
+          <button
+            onClick={() => { setFilter('ALL'); setSevFilter('ALL'); setSearch('') }}
+            style={{
+              marginLeft:'8px', padding:'7px 12px', borderRadius:'8px',
+              fontSize:'10px', fontWeight:700, letterSpacing:'0.04em',
+              background:'rgba(239,68,68,0.10)',
+              border:'1px solid rgba(239,68,68,0.30)',
+              color:'#F87171', cursor:'pointer', transition:'all .15s',
+              display:'flex', alignItems:'center', gap:'4px',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.18)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.10)'}>
+            <span>✕</span> CLEAR FILTERS
+          </button>
+        )}
+        {/* Result count */}
+        <span style={{ marginLeft:'auto', fontSize:'10px', color:'#64748B',
+          fontWeight:600 }}>
+          Showing <strong style={{ color:'#94A3B8' }}>{visible.length}</strong> of {items.length}
+        </span>
+      </div>
+
+      {/* Cards — empty state more inviting + grid more breathable + date groups */}
       {visible.length === 0 ? (
-        <div style={{ ...CARD, textAlign:'center', padding:'60px 30px' }}>
-          <div style={{ fontSize:'34px', color:'#2D3348', marginBottom:'14px' }}>📂</div>
-          <div style={{ fontSize:'14px', fontWeight:700, color:'#94A3B8', marginBottom:'6px' }}>
+        <div style={{ ...CARD, textAlign:'center', padding:'72px 30px',
+          background:'linear-gradient(180deg, rgba(17,24,39,0.6) 0%, rgba(15,23,42,0.4) 100%)',
+          border:'1px dashed rgba(51,65,85,0.50)' }}>
+          <div style={{ fontSize:'44px', marginBottom:'18px',
+            opacity:0.4, filter:'grayscale(0.3)' }}>
+            {items.length === 0 ? '📂' : '🔍'}
+          </div>
+          <div style={{ fontSize:'15px', fontWeight:700, color:'#CBD5E1',
+            marginBottom:'8px', letterSpacing:'-0.01em' }}>
             {items.length === 0 ? 'No recordings in the database yet'
+              : search ? 'No videos match your search'
               : 'No videos match the selected filters'}
           </div>
-          <div style={{ fontSize:'12px', color:'#475569', lineHeight:1.7 }}>
+          <div style={{ fontSize:'12px', color:'#64748B', lineHeight:1.8,
+            maxWidth:'480px', margin:'0 auto' }}>
             {items.length === 0 ? (
-              <>Drop a video file into <code style={{ color:'#3B82F6' }}>
+              <>Drop a video file into<br/>
+              <code style={{
+                display:'inline-block', marginTop:'8px', padding:'6px 14px',
+                background:'rgba(96,165,250,0.10)', color:'#60A5FA',
+                border:'1px solid rgba(96,165,250,0.25)', borderRadius:'8px',
+                fontFamily:'ui-monospace, "SF Mono", Menlo, monospace',
+                fontSize:'11px', wordBreak:'break-all',
+              }}>
                 {status?.folder || 'bodycam_dotnet/WatchFolder/Inbox/'}
-              </code><br/>and it will be analyzed automatically.</>
-            ) : 'Try clearing the status / severity filters.'}
+              </code><br/><br/>
+              and it will be analyzed automatically within seconds.</>
+            ) : search
+                ? <>Try a different keyword or <button onClick={() => setSearch('')} style={{ background:'transparent', border:'none', color:'#60A5FA', fontWeight:700, cursor:'pointer', textDecoration:'underline' }}>clear the search</button>.</>
+                : 'Try clearing the status / severity filters above.'}
           </div>
         </div>
+      ) : grouped ? (
+        // Grouped view (newest/oldest sorting) — with date headers
+        <>
+          {['Today', 'Yesterday', 'This Week', 'Older'].map(g => {
+            const groupItems = grouped[g]
+            if (!groupItems || groupItems.length === 0) return null
+            return (
+              <div key={g} style={{ marginBottom:'24px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'10px',
+                  marginBottom:'12px' }}>
+                  <span style={{
+                    fontSize:'11px', fontWeight:800, color:'#94A3B8',
+                    letterSpacing:'0.10em', textTransform:'uppercase',
+                  }}>
+                    {g}
+                  </span>
+                  <span style={{
+                    padding:'2px 9px', borderRadius:'10px',
+                    background:'rgba(51,65,85,0.40)', color:'#94A3B8',
+                    fontSize:'10px', fontWeight:700,
+                  }}>
+                    {groupItems.length}
+                  </span>
+                  <span style={{ flex:1, height:'1px',
+                    background:'linear-gradient(90deg, rgba(51,65,85,0.40), transparent)' }}/>
+                </div>
+                <div style={{ display:'grid',
+                  gridTemplateColumns:'repeat(auto-fill, minmax(380px, 1fr))', gap:'16px' }}>
+                  {groupItems.map(item => (
+                    <VideoCard key={item.file_id} item={item}
+                      onOpen={() => openDetails(item)}
+                      onRemove={(e) => remove(item, e)}/>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </>
       ) : (
+        // Flat view (sorted by score/severity — no date grouping)
         <div style={{ display:'grid',
-          gridTemplateColumns:'repeat(auto-fill, minmax(360px, 1fr))', gap:'14px' }}>
+          gridTemplateColumns:'repeat(auto-fill, minmax(380px, 1fr))', gap:'16px' }}>
           {visible.map(item => (
             <VideoCard key={item.file_id} item={item}
               onOpen={() => openDetails(item)}
@@ -526,9 +813,30 @@ export default function VideoAnalysis() {
         </div>
       )}
 
-      {/* Details modal */}
-      {openId && (
-        <DetailsModal data={openData} onClose={closeDetails}/>
+      {/* Rich Gemini + acoustic + visual breakdown */}
+      <IncidentDetailModal
+        recordingId={openId}
+        onClose={closeDetails}/>
+
+      {/* Toast — fired when user clicks an in-flight ANALYZING / ERROR row */}
+      {openToast && (
+        <div style={{ position:'fixed', bottom:'24px', right:'24px',
+          background:'rgba(15,23,42,0.95)', color:'#F1F5F9',
+          border:'1px solid rgba(245,158,11,0.40)',
+          borderLeft:'3px solid #F59E0B',
+          padding:'12px 18px', borderRadius:'12px',
+          fontSize:'12px', maxWidth:'360px', zIndex:1100,
+          boxShadow:'0 12px 32px rgba(0,0,0,0.45)',
+          animation:'fadeIn .2s ease-out' }}>
+          <div style={{ fontSize:'10px', color:'#F59E0B', fontWeight:800,
+            letterSpacing:'0.10em', textTransform:'uppercase',
+            marginBottom:'4px' }}>
+            {openToast.filename}
+          </div>
+          <div style={{ color:'#CBD5E1', lineHeight:1.5 }}>
+            {openToast.message}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -539,49 +847,99 @@ export default function VideoAnalysis() {
 
 function KPI({ label, value, color }) {
   return (
-    <div style={{ background:'rgba(15,23,42,0.6)', borderRadius:'10px',
-      padding:'8px 14px', border:'1px solid #1F2937', minWidth:'72px',
-      textAlign:'center' }}>
+    <div style={{
+      background:'linear-gradient(180deg, rgba(15,23,42,0.7) 0%, rgba(15,23,42,0.4) 100%)',
+      borderRadius:'12px', padding:'10px 16px',
+      border:'1px solid rgba(51,65,85,0.40)', minWidth:'80px',
+      textAlign:'center',
+      boxShadow:'0 1px 0 rgba(255,255,255,0.04) inset',
+      transition:'all .2s',
+    }}
+    onMouseEnter={e => e.currentTarget.style.borderColor = `${color}55`}
+    onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(51,65,85,0.40)'}>
       <div style={{ fontSize:'9px', color:'#64748B', fontWeight:700,
-        textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'2px' }}>
+        textTransform:'uppercase', letterSpacing:'0.10em', marginBottom:'4px' }}>
         {label}
       </div>
-      <div style={{ fontSize:'18px', fontWeight:800, color }}>{value}</div>
+      <div style={{ fontSize:'20px', fontWeight:800, color,
+        letterSpacing:'-0.02em', lineHeight:1 }}>{value}</div>
     </div>
   )
 }
 
-// Tone label as a coloured chip so it's instantly readable next to the score.
+// Tone label as a coloured chip — refined glassmorphism style
 const TONE_COLOR = {
-  NORMAL:     { fg:'#10B981', bg:'rgba(16,185,129,0.10)',  border:'rgba(16,185,129,0.30)' },
-  HARSH:      { fg:'#F59E0B', bg:'rgba(245,158,11,0.12)',  border:'rgba(245,158,11,0.30)' },
-  ANGRY:      { fg:'#EF4444', bg:'rgba(239,68,68,0.12)',   border:'rgba(239,68,68,0.30)'  },
-  BRIBE_TONE: { fg:'#8B5CF6', bg:'rgba(139,92,246,0.12)',  border:'rgba(139,92,246,0.30)' },
+  NORMAL:     { fg:'#34D399', bg:'rgba(16,185,129,0.12)',  border:'rgba(16,185,129,0.35)' },
+  HARSH:      { fg:'#FBBF24', bg:'rgba(245,158,11,0.14)',  border:'rgba(245,158,11,0.35)' },
+  ANGRY:      { fg:'#F87171', bg:'rgba(239,68,68,0.14)',   border:'rgba(239,68,68,0.35)'  },
+  BRIBE_TONE: { fg:'#A78BFA', bg:'rgba(139,92,246,0.14)',  border:'rgba(139,92,246,0.35)' },
 }
 
-function ToneChip({ tone }) {
-  const cfg = TONE_COLOR[tone] || TONE_COLOR.NORMAL
+// Muted style — used when the SVM heard ANGRY/HARSH/BRIBE but the overall
+// severity stayed NORMAL (acoustic-only, no abusive language). Avoids the
+// visual contradiction of a red ANGRY chip on a green NORMAL card.
+const TONE_MUTED = { fg:'#94A3B8', bg:'rgba(148,163,184,0.10)',
+  border:'rgba(148,163,184,0.30)' }
+
+function ToneChip({ tone, severity }) {
+  const acousticOnly =
+    /ANGRY|HARSH|BRIBE/.test(tone || '') && severity === 'NORMAL'
+  const cfg = acousticOnly
+    ? TONE_MUTED
+    : (TONE_COLOR[tone] || TONE_COLOR.NORMAL)
   return (
-    <span style={{
-      padding:'2px 8px', borderRadius:'5px', fontWeight:700, letterSpacing:'0.04em',
-      color: cfg.fg, background: cfg.bg, border:`1px solid ${cfg.border}`,
-    }}>
+    <span title={acousticOnly
+        ? `Voice classified ${tone} but no abusive language → severity NORMAL`
+        : undefined}
+      style={{
+        padding:'3px 10px', borderRadius:'6px', fontWeight:700,
+        letterSpacing:'0.06em', fontSize:'10px',
+        color: cfg.fg, background: cfg.bg,
+        border:`1px solid ${cfg.border}`,
+        boxShadow:`0 0 8px ${cfg.bg}`,
+        opacity: acousticOnly ? 0.85 : 1,
+      }}>
       {tone.replace('_TONE', '')}
+      {acousticOnly && (
+        <span style={{ marginLeft:'5px', fontSize:'8px', opacity:0.75 }}>
+          · acoustic
+        </span>
+      )}
     </span>
   )
 }
 
-function FilterPill({ label, active, onClick }) {
+function FilterPill({ label, active, onClick, count }) {
   return (
-    <button onClick={onClick} style={{
-      padding:'7px 14px', borderRadius:'8px', fontSize:'11px', fontWeight:700,
-      letterSpacing:'0.04em',
-      background: active ? 'rgba(59,130,246,0.15)' : '#0B0F1A',
-      border: `1px solid ${active ? 'rgba(59,130,246,0.4)' : '#1F2937'}`,
-      color: active ? '#3B82F6' : '#94A3B8',
-      cursor:'pointer', transition:'all .2s',
+    <button onClick={onClick}
+      onMouseEnter={e => !active && (e.currentTarget.style.background = 'rgba(51,65,85,0.30)')}
+      onMouseLeave={e => !active && (e.currentTarget.style.background = 'rgba(11,15,26,0.60)')}
+      style={{
+        padding:'8px 14px', borderRadius:'10px', fontSize:'11px', fontWeight:700,
+        letterSpacing:'0.06em',
+        background: active
+          ? 'linear-gradient(135deg, rgba(96,165,250,0.20) 0%, rgba(99,102,241,0.20) 100%)'
+          : 'rgba(11,15,26,0.60)',
+        border: active
+          ? '1px solid rgba(96,165,250,0.50)'
+          : '1px solid rgba(51,65,85,0.40)',
+        color: active ? '#60A5FA' : '#94A3B8',
+        cursor:'pointer', transition:'all .2s',
+        boxShadow: active ? '0 0 16px rgba(96,165,250,0.20)' : 'none',
+        display:'inline-flex', alignItems:'center', gap:'6px',
     }}>
       {label}
+      {typeof count === 'number' && (
+        <span style={{
+          padding:'1px 7px', borderRadius:'10px',
+          background: active ? 'rgba(96,165,250,0.30)' : 'rgba(51,65,85,0.50)',
+          color: active ? '#DBEAFE' : '#94A3B8',
+          fontSize:'10px', fontWeight:800,
+          minWidth:'20px', textAlign:'center',
+        }}>
+          {count}
+        </span>
+      )}
     </button>
   )
 }
@@ -595,195 +953,200 @@ function VideoCard({ item, onOpen, onRemove }) {
   const isPulsing = sev === 'CRITICAL'
   const violationCount = item.violations_count ?? 0
 
+  // Severity-driven gradient backgrounds for visual hierarchy
+  const cardBg = sev === 'CRITICAL'
+    ? 'linear-gradient(180deg, rgba(239,68,68,0.06) 0%, rgba(17,24,39,0.95) 60%)'
+    : sev === 'WARNING'
+      ? 'linear-gradient(180deg, rgba(245,158,11,0.05) 0%, rgba(17,24,39,0.95) 60%)'
+      : 'linear-gradient(180deg, #111827 0%, #0F172A 100%)'
+
+  const cardBorder = sev === 'CRITICAL' ? '1px solid rgba(239,68,68,0.35)'
+                  : sev === 'WARNING'  ? '1px solid rgba(245,158,11,0.25)'
+                  : '1px solid rgba(51,65,85,0.40)'
+
   return (
     <div onClick={onOpen}
+      className="va-card-anim"
       style={{
-        background:'#111827',
-        border: sev === 'CRITICAL' ? '1px solid rgba(239,68,68,0.45)'
-              : sev === 'WARNING' ? '1px solid rgba(245,158,11,0.30)'
-              : '1px solid #1F2937',
-        borderRadius:'14px', padding:'16px', cursor:'pointer',
-        transition:'all .2s', position:'relative', overflow:'hidden',
-        animation: isPulsing ? 'criticalPulse 3s infinite' : 'none',
+        position:'relative', overflow:'hidden',
+        background: cardBg,
+        border: cardBorder,
+        borderRadius:'16px', padding:'18px', cursor:'pointer',
+        transition:'all .25s cubic-bezier(0.4, 0, 0.2, 1)',
+        boxShadow:'0 1px 0 rgba(255,255,255,0.04) inset, 0 4px 16px rgba(0,0,0,0.20)',
+        animation: isPulsing ? 'criticalPulse 3s infinite' : undefined,
       }}
-      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-      onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}>
+      onMouseEnter={e => {
+        e.currentTarget.style.transform = 'translateY(-3px)'
+        e.currentTarget.style.boxShadow = '0 1px 0 rgba(255,255,255,0.06) inset, 0 16px 32px rgba(0,0,0,0.30)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.transform = 'translateY(0)'
+        e.currentTarget.style.boxShadow = '0 1px 0 rgba(255,255,255,0.04) inset, 0 4px 16px rgba(0,0,0,0.20)'
+      }}>
 
-      {/* Top row: status + severity */}
+      {/* Subtle severity glow in corner */}
+      {sev && sev !== 'NORMAL' && (
+        <div style={{
+          position:'absolute', top:'-40px', right:'-40px', width:'160px', height:'160px',
+          background: `radial-gradient(circle, ${sevCfg?.bg} 0%, transparent 70%)`,
+          pointerEvents:'none', filter:'blur(30px)',
+        }}/>
+      )}
+
+      {/* Top row: status + severity + delete */}
       <div style={{ display:'flex', justifyContent:'space-between',
-        alignItems:'flex-start', gap:'8px', marginBottom:'10px' }}>
+        alignItems:'flex-start', gap:'8px', marginBottom:'14px',
+        position:'relative' }}>
         <span style={{
-          padding:'3px 10px', borderRadius:'6px', fontSize:'9px',
-          fontWeight:800, letterSpacing:'0.06em',
+          padding:'4px 12px', borderRadius:'8px', fontSize:'9px',
+          fontWeight:800, letterSpacing:'0.10em',
           color: stat.fg, background: stat.bg, border: `1px solid ${stat.border}`,
           display:'inline-flex', alignItems:'center', gap:'6px',
+          boxShadow: `0 0 12px ${stat.glow || stat.bg}`,
         }}>
-          {isAnalyzing && <Spinner size={8} color={stat.fg}/>}
+          {isAnalyzing && <Spinner size={9} color={stat.fg}/>}
+          {!isAnalyzing && <span style={{ fontSize:'10px' }}>{stat.icon}</span>}
           {stat.label}
         </span>
-        <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+        <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
           {sevCfg && <SeverityBadge severity={sev}/>}
           <button onClick={onRemove}
             title={item.recording_id ? 'Delete from database' : 'Remove from list'}
-            style={{ background:'transparent', border:'none', color:'#475569',
-              fontSize:'14px', cursor:'pointer', padding:'2px 6px' }}>
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.10)'; e.currentTarget.style.color = '#F87171' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#475569' }}
+            style={{
+              background:'transparent', border:'1px solid rgba(51,65,85,0.40)',
+              color:'#475569', width:'24px', height:'24px',
+              fontSize:'12px', cursor:'pointer', padding:0,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              borderRadius:'6px', transition:'all .15s',
+            }}>
             ✕
           </button>
         </div>
       </div>
 
-      {/* Filename */}
-      <div style={{ fontSize:'13px', fontWeight:700, color:'#F1F5F9',
-        marginBottom:'4px', wordBreak:'break-all', lineHeight:1.4 }}>
+      {/* Filename — bold and prominent */}
+      <div style={{ fontSize:'14px', fontWeight:700, color:'#F1F5F9',
+        marginBottom:'6px', wordBreak:'break-all', lineHeight:1.4,
+        letterSpacing:'-0.01em', position:'relative' }}>
         {item.filename}
       </div>
-      <div style={{ fontSize:'10px', color:'#64748B', marginBottom:'12px' }}>
-        {item.media_type === 'video' ? '🎬 Video' : '🎙 Audio'}
-        {item.size_bytes ? ` · ${formatBytes(item.size_bytes)}` : ''}
-        {item.duration_sec ? ` · ${item.duration_sec.toFixed(1)}s` : ''}
-        {' · '}{formatAgo(item.finished_at || item.started_at || item.queued_at)}
+      <div style={{ fontSize:'10px', color:'#64748B', marginBottom:'14px',
+        display:'flex', alignItems:'center', gap:'6px', position:'relative' }}>
+        <span style={{
+          padding:'2px 8px', borderRadius:'4px', fontSize:'9px', fontWeight:700,
+          background:'rgba(51,65,85,0.30)', color:'#94A3B8',
+          letterSpacing:'0.05em',
+        }}>
+          {item.media_type === 'video' ? '🎬 VIDEO' : '🎙 AUDIO'}
+        </span>
+        {item.size_bytes && <span>{formatBytes(item.size_bytes)}</span>}
+        {item.duration_sec ? <span>· {item.duration_sec.toFixed(1)}s</span> : null}
+        <span style={{ marginLeft:'auto' }}>{formatAgo(item.finished_at || item.started_at || item.queued_at)}</span>
       </div>
 
-      {/* Body — analyzing skeleton vs done content vs error */}
+      {/* Body — analyzing / queued / error / done */}
       {item.status === 'queued' && (
-        <div style={{ fontSize:'11px', color:'#64748B', fontStyle:'italic' }}>
-          Waiting for the worker thread…
+        <div style={{ fontSize:'11px', color:'#64748B', fontStyle:'italic',
+          padding:'10px 12px', background:'rgba(51,65,85,0.20)',
+          borderRadius:'10px', textAlign:'center' }}>
+          ⏱  Waiting for the worker thread…
         </div>
       )}
 
       {isAnalyzing && (
-        <div style={{ display:'flex', alignItems:'center', gap:'10px',
-          background:'rgba(59,130,246,0.06)', borderRadius:'10px',
-          padding:'12px', border:'1px solid rgba(59,130,246,0.2)' }}>
-          <Spinner size={18} color="#3B82F6"/>
-          <div style={{ fontSize:'11px', color:'#3B82F6', fontWeight:600 }}>
-            Running pipeline — ffmpeg · Gemini · voiceprint · transcription · scoring
+        <div style={{ display:'flex', alignItems:'center', gap:'12px',
+          background:'linear-gradient(135deg, rgba(96,165,250,0.10) 0%, rgba(99,102,241,0.05) 100%)',
+          borderRadius:'12px', padding:'14px',
+          border:'1px solid rgba(96,165,250,0.25)',
+          boxShadow:'0 0 16px rgba(96,165,250,0.15)' }}>
+          <Spinner size={20} color="#60A5FA"/>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:'11px', color:'#60A5FA', fontWeight:700,
+              marginBottom:'2px', letterSpacing:'0.02em' }}>
+              Running analysis pipeline
+            </div>
+            <div style={{ fontSize:'10px', color:'#64748B', lineHeight:1.5 }}>
+              ffmpeg · Gemini · voiceprint · transcription · scoring
+            </div>
           </div>
         </div>
       )}
 
       {item.status === 'error' && (
-        <div style={{ fontSize:'11px', color:'#EF4444',
-          background:'rgba(239,68,68,0.08)', borderRadius:'10px',
-          padding:'10px 12px', border:'1px solid rgba(239,68,68,0.25)' }}>
+        <div style={{ fontSize:'11px', color:'#F87171', lineHeight:1.6,
+          background:'linear-gradient(135deg, rgba(239,68,68,0.10) 0%, rgba(239,68,68,0.04) 100%)',
+          borderRadius:'10px', padding:'12px 14px',
+          border:'1px solid rgba(239,68,68,0.30)' }}>
+          <div style={{ fontSize:'9px', fontWeight:800, letterSpacing:'0.10em',
+            color:'#EF4444', marginBottom:'4px' }}>
+            ⚠ PIPELINE ERROR
+          </div>
           {item.error || 'Pipeline error'}
         </div>
       )}
 
       {item.status === 'done' && (
         <>
-          <div style={{ display:'flex', gap:'14px', alignItems:'center',
-            marginBottom:'12px' }}>
-            <ScoreRing score={score} severity={sev || 'NORMAL'} size={72}/>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:'10px', color:'#64748B', fontWeight:700,
-                textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'4px' }}>
+          <div style={{ display:'flex', gap:'16px', alignItems:'center',
+            marginBottom:'14px', position:'relative' }}>
+            <ScoreRing score={score} severity={sev || 'NORMAL'} size={76}/>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:'9px', color:'#64748B', fontWeight:800,
+                textTransform:'uppercase', letterSpacing:'0.10em', marginBottom:'5px' }}>
                 Officer
               </div>
-              <div style={{ fontSize:'12px', fontWeight:700, color:'#F1F5F9' }}>
+              <div style={{ fontSize:'13px', fontWeight:700, color:'#F1F5F9',
+                letterSpacing:'-0.01em', marginBottom:'2px',
+                whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                 {item.officer_name || item.officer_id || 'Unknown'}
               </div>
               {item.officer_badge && (
-                <div style={{ fontSize:'10px', color:'#64748B', marginTop:'2px' }}>
+                <div style={{ fontSize:'10px', color:'#64748B',
+                  fontFamily:'ui-monospace, "SF Mono", Menlo, monospace' }}>
                   {item.officer_badge}
                 </div>
               )}
-              <div style={{ marginTop:'6px', display:'flex', gap:'8px',
-                fontSize:'10px', color:'#64748B', flexWrap:'wrap' }}>
-                <ToneChip tone={item.tone_label || 'NORMAL'}/>
-                <span>{violationCount} violation{violationCount === 1 ? '' : 's'}</span>
+              <div style={{ marginTop:'8px', display:'flex', gap:'6px',
+                alignItems:'center', flexWrap:'wrap' }}>
+                <ToneChip tone={item.tone_label || 'NORMAL'}
+                  severity={item.severity}/>
+                <span style={{ fontSize:'10px', color:'#64748B', fontWeight:600 }}>
+                  {violationCount} violation{violationCount === 1 ? '' : 's'}
+                </span>
               </div>
             </div>
           </div>
 
           {violationCount > 0 && (
-            <div style={{ marginBottom:'10px' }}>
+            <div style={{ marginBottom:'12px', position:'relative' }}>
               <div style={LABEL}>Violations detected</div>
               <span style={{
-                fontSize:'10px', fontWeight:600,
-                padding:'3px 8px', borderRadius:'6px',
-                color:'#EF4444', background:'rgba(239,68,68,0.10)',
-                border:'1px solid rgba(239,68,68,0.25)',
+                display:'inline-flex', alignItems:'center', gap:'6px',
+                fontSize:'10px', fontWeight:700,
+                padding:'5px 12px', borderRadius:'8px',
+                color:'#F87171',
+                background:'linear-gradient(135deg, rgba(239,68,68,0.12) 0%, rgba(239,68,68,0.04) 100%)',
+                border:'1px solid rgba(239,68,68,0.30)',
+                boxShadow:'0 0 12px rgba(239,68,68,0.10)',
               }}>
+                <span>⚠</span>
                 {violationCount} flagged — open card for details
               </span>
             </div>
           )}
 
-          <div style={{ marginTop:'10px', textAlign:'center', fontSize:'10px',
-            color:'#3B82F6', fontWeight:600 }}>
+          <div style={{ marginTop:'14px', paddingTop:'12px',
+            borderTop:'1px solid rgba(51,65,85,0.30)',
+            textAlign:'center', fontSize:'11px',
+            color:'#60A5FA', fontWeight:700, letterSpacing:'0.02em',
+            position:'relative' }}>
             Click to view full assessment →
           </div>
         </>
       )}
-    </div>
-  )
-}
-
-function DetailsModal({ data, onClose }) {
-  useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
-
-  return (
-    <div onClick={onClose} style={{
-      position:'fixed', inset:0, background:'rgba(11,15,26,0.85)',
-      backdropFilter:'blur(4px)', zIndex:1000, padding:'24px',
-      overflowY:'auto', display:'flex', justifyContent:'center',
-      alignItems:'flex-start',
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        width:'100%', maxWidth:'1000px', background:'#0B0F1A',
-        border:'1px solid #1F2937', borderRadius:'16px',
-        padding:'24px', position:'relative', minHeight:'200px',
-      }}>
-        <button onClick={onClose} style={{
-          position:'absolute', top:'14px', right:'14px',
-          background:'#1F2937', border:'1px solid #2D3348',
-          color:'#94A3B8', borderRadius:'8px', padding:'6px 12px',
-          fontSize:'12px', fontWeight:700, cursor:'pointer',
-        }}>
-          Close · Esc
-        </button>
-
-        {!data && (
-          <div style={{ textAlign:'center', padding:'60px 20px' }}>
-            <Spinner size={32} color="#3B82F6"/>
-            <div style={{ fontSize:'13px', color:'#94A3B8', marginTop:'14px' }}>
-              Loading full result…
-            </div>
-          </div>
-        )}
-
-        {data?.error && (
-          <div style={{ padding:'40px 20px', textAlign:'center', color:'#EF4444' }}>
-            {data.error}
-          </div>
-        )}
-
-        {data && data.result && (
-          <>
-            <div style={{ fontSize:'10px', color:'#64748B', fontWeight:700,
-              textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'4px' }}>
-              {data.filename}
-            </div>
-            <h2 style={{ fontSize:'18px', fontWeight:800, color:'#F1F5F9',
-              marginBottom:'18px' }}>
-              Full Analysis · {data.result.severity || 'PENDING'}
-            </h2>
-            <ResultPanel result={data.result}/>
-          </>
-        )}
-
-        {data && !data.result && !data.error && (
-          <div style={{ padding:'40px 20px', textAlign:'center', color:'#94A3B8',
-            fontSize:'13px' }}>
-            This file is still {data.status}. Try again in a moment.
-          </div>
-        )}
-      </div>
     </div>
   )
 }

@@ -1,0 +1,119 @@
+# ─────────────────────────────────────────────────────────────────
+# PERA Bodycam — full-stack docker-compose for Oracle Cloud Free.
+#
+# Services (all on the internal `pera_net` network):
+#   • mssql      — Azure SQL Edge (MSSQL-compatible, ARM-friendly)
+#   • python     — Flask + SocketIO + Whisper + ffmpeg
+#   • dotnet     — ASP.NET 8 API + watch-folder service
+#   • frontend   — nginx serving React + reverse-proxying APIs
+#   • cloudflared — quick tunnel → free public HTTPS URL (no domain)
+#
+# All secrets come from .env (NOT committed).
+# Usage:
+#   docker compose --env-file .env up -d --build
+# ─────────────────────────────────────────────────────────────────
+services:
+
+  # ── MSSQL-compatible DB (Azure SQL Edge, runs on ARM) ────────
+  mssql:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    container_name: pera_mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MSSQL_PID: Developer
+    ports:
+      - "127.0.0.1:1433:1433"      # bound to localhost only on the host
+    volumes:
+      - mssql_data:/var/opt/mssql
+    networks: [ pera_net ]
+    restart: unless-stopped
+
+  # ── Python ML pipeline ──────────────────────────────────────
+  python:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.python
+    container_name: pera_python
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_REQUIRED: "false"
+    volumes:
+      - python_models:/app/models
+      - python_voiceprints:/app/voiceprints
+      - python_data:/app/data
+    networks: [ pera_net ]
+    expose:
+      - "5050"
+    restart: unless-stopped
+
+  # ── .NET API + watch-folder service ─────────────────────────
+  dotnet:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dotnet
+    container_name: pera_dotnet
+    depends_on:
+      - mssql
+      - python
+    environment:
+      # MSSQL connection string (same shape as appsettings.json
+      # but pointing at the in-network mssql service).
+      ConnectionStrings__MsSql: "Server=mssql,1433;Database=bodycam_ai;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;"
+      Gemini__ApiKey:           ${GEMINI_API_KEY}
+      Gemini__Model:            "gemini-2.5-flash-lite"
+      Python__BaseUrl:          "http://python:5050"
+      Cors__AllowedOrigins__0:  "http://localhost"
+      Cors__AllowedOrigins__1:  "http://${VM_PUBLIC_IP}"
+      WatchFolder__Path:        /app/WatchFolder
+      WatchFolder__DefaultOfficerId:  ${DEFAULT_OFFICER_ID:-EO000}
+      WatchFolder__DefaultStationId:  ${DEFAULT_STATION_ID:-auto:watch-folder}
+    volumes:
+      - ./watch-folder:/app/WatchFolder           # drop videos here
+    networks: [ pera_net ]
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  # ── Frontend (nginx + built React) ──────────────────────────
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        # Same-origin paths so browser never makes CORS calls.
+        VITE_API_URL:        /py-api
+        VITE_DOTNET_API_URL: /api
+    container_name: pera_frontend
+    depends_on:
+      - dotnet
+      - python
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+    networks: [ pera_net ]
+    restart: unless-stopped
+
+  # ── Cloudflare quick tunnel — free public HTTPS URL ──────────
+  # Tails the frontend container's port 80 and emits a public
+  # https://*.trycloudflare.com URL. Runs in the same VM, so the URL
+  # stays alive 24/7.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: pera_tunnel
+    command: tunnel --no-autoupdate --url http://frontend:80
+    depends_on:
+      - frontend
+    networks: [ pera_net ]
+    restart: unless-stopped
+
+networks:
+  pera_net:
+    driver: bridge
+
+volumes:
+  mssql_data:
+  python_models:
+  python_voiceprints:
+  python_data:

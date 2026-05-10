@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(dotnet build *)",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(curl -s http://localhost:8080/api/recordings)",
+      "Bash(curl -s http://localhost:8080/api/recordings/78)",
+      "Bash(curl -s http://localhost:8080/api/critical-incidents)",
+      "Bash(curl -s -o NUL -w \"%{http_code}\" http://localhost:8080/api/critical-incidents)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('analysisResult.violations:', len\\(d.get\\('analysisResult',{}\\).get\\('violations'\\) or []\\)\\); print\\('analysisResult.recording.violations:', len\\(d.get\\('analysisResult',{}\\).get\\('recording',{}\\).get\\('violations'\\) or []\\)\\); print\\('top-level keys:', list\\(d.keys\\(\\)\\)\\); print\\('analysisResult keys:', list\\(d.get\\('analysisResult',{}\\).keys\\(\\)\\)\\)\")",
+      "Bash(awk 'NR<=1131' c:/Projects/EO-BodyCam-AI/bodycam_frontend/src/pages/VideoAnalysis.jsx)",
+      "Bash(mv /tmp/va.txt c:/Projects/EO-BodyCam-AI/bodycam_frontend/src/pages/VideoAnalysis.jsx)"
     ]
   }
 }

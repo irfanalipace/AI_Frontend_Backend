@@ -701,8 +701,10 @@ def _gemini_transcribe(audio_path):
             if resp.status_code == 200:
                 break
             if resp.status_code in (429, 503):
+                # Paid tier — short waits, 503s recover quickly
                 import time as _t
-                _t.sleep(2 + _attempt * 3)
+                waits = [1, 3, 6]
+                _t.sleep(waits[min(_attempt, len(waits) - 1)])
                 print(f"  [gemini-tx] retry {_attempt+1}/3 (status {resp.status_code})", flush=True)
                 continue
             break
@@ -1057,7 +1059,10 @@ For `emotions.breakdown`, the eight values should roughly sum to 100 (they repre
                 )
                 return data
             if resp.status_code in (429, 503):
-                wait = 2 * (2 ** _attempt)
+                # Paid Gemini tier — 503s are rare and transient, recover in 1-3s.
+                # Shorter waits (1, 3, 6, 10s) total ~20s vs old 30s.
+                waits = [1, 3, 6, 10]
+                wait = waits[min(_attempt, len(waits) - 1)]
                 print(f"  [gemini-full] http {resp.status_code} — retry {_attempt+1}/4 in {wait}s", flush=True)
                 _t.sleep(wait)
                 continue
@@ -1439,7 +1444,7 @@ def auto_transcribe(audio, sample_rate=SR):
     # ═══════════════════════════════════════════════════════════
     tmp_full = None
     try:
-        full_clip = audio[:sample_rate * 300]  # up to 5 minutes
+        full_clip = audio[:sample_rate * 600]  # up to 10 minutes (paid Gemini tier)
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             sf.write(f.name, full_clip.astype(np.float32), sample_rate)
             tmp_full = f.name
@@ -2527,7 +2532,7 @@ def run_analysis(audio, sr, officer_id="EO_001", source="upload", filename=""):
     try:
         if _gemini_key():
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as _gf:
-                _sf_pre.write(_gf.name, analyze_audio[:sr * 300].astype(np.float32), sr)
+                _sf_pre.write(_gf.name, analyze_audio[:sr * 600].astype(np.float32), sr)
                 gemini_full_tmp = _gf.name
             gemini_full_executor = _TPEpre(max_workers=1)
             # Empty hints — Gemini analyzes the audio directly. The prompt

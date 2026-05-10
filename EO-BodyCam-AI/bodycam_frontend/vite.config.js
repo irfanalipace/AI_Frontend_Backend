@@ -5,6 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000,
+    // Allow Cloudflare quick tunnels (*.trycloudflare.com) so the dev
+    // server can be exposed for sharing. Without this Vite returns 403
+    // for any non-localhost Host header (its security default).
+    allowedHosts: ['.trycloudflare.com', 'localhost'],
     // ffmpeg.wasm needs SharedArrayBuffer, which requires these COOP/COEP headers.
     // Without them the in-browser audio extraction won't load.
     headers: {

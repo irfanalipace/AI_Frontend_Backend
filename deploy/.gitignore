@@ -1,0 +1,7 @@
+# Never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Watch folder content lives on the VM only
+watch-folder/

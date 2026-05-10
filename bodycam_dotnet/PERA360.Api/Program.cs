@@ -16,10 +16,15 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddApplication();
 
 // ── CORS so the React frontend can talk to us directly ────────────
+// Allows the configured exact origins PLUS any *.trycloudflare.com host
+// so Cloudflare quick tunnels work without re-editing config every time
+// a new tunnel URL is generated.
 var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
     ?? new[] { "http://localhost:5173", "http://localhost:3000" };
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.WithOrigins(corsOrigins)
+    p.SetIsOriginAllowed(origin =>
+            corsOrigins.Contains(origin) ||
+            origin.EndsWith(".trycloudflare.com", StringComparison.OrdinalIgnoreCase))
      .AllowAnyMethod()
      .AllowAnyHeader()
      .AllowCredentials()));

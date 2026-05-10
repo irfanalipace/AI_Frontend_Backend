@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────────
+# .NET 8 API — multi-stage build, multi-arch (x86_64 + ARM64).
+# Stage 1 builds + publishes; stage 2 runs only the published bits.
+# ─────────────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+
+WORKDIR /src
+
+# Copy csproj files first so NuGet restore caches correctly.
+COPY bodycam_dotnet/PERA360.sln                       ./
+COPY bodycam_dotnet/PERA360.Api/PERA360.Api.csproj                   PERA360.Api/
+COPY bodycam_dotnet/PERA360.Application/PERA360.Application.csproj   PERA360.Application/
+COPY bodycam_dotnet/PERA360.Domain/PERA360.Domain.csproj             PERA360.Domain/
+COPY bodycam_dotnet/PERA360.Infrastructure/PERA360.Infrastructure.csproj PERA360.Infrastructure/
+COPY bodycam_dotnet/PERA360.Shared/PERA360.Shared.csproj             PERA360.Shared/
+
+RUN dotnet restore PERA360.sln
+
+# Copy the rest of the source.
+COPY bodycam_dotnet/ ./
+
+RUN dotnet publish PERA360.Api/PERA360.Api.csproj -c Release -o /app/publish --no-restore
+
+# ─── Runtime image ──────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+
+# ffmpeg is required at runtime (the .NET API extracts audio from
+# uploaded videos before forwarding to the Python ML pipeline).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=build /app/publish .
+
+# Watch folder volume mount point — docker-compose binds a host
+# directory here so files dropped on the VM appear inside.
+RUN mkdir -p /app/WatchFolder/Inbox /app/WatchFolder/Processed /app/WatchFolder/Failed
+
+ENV ASPNETCORE_URLS=http://+:8080 \
+    ASPNETCORE_ENVIRONMENT=Production \
+    Ffmpeg__Path=/usr/bin/ffmpeg \
+    WatchFolder__Path=/app/WatchFolder
+
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "PERA360.Api.dll"]
