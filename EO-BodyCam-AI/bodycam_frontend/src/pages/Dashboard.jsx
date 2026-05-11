@@ -240,6 +240,25 @@ export default function Dashboard() {
   })
   const dailyData = Object.values(dailyMap)
 
+  // ─── Focus metrics (TODAY / THIS WEEK / monitoring-team essentials) ───
+  const startToday = new Date(); startToday.setHours(0,0,0,0)
+  const startWeek  = new Date(today.getTime() - 6 * 86400000)
+  const isAfter = (iso, d) => iso && new Date(iso).getTime() >= d.getTime()
+  const todayItems = allItems.filter(i => isAfter(i.uploadedAt, startToday))
+  const weekItems  = allItems.filter(i => isAfter(i.uploadedAt, startWeek))
+  const todayStats = {
+    total:    todayItems.length,
+    critical: todayItems.filter(i => i.severity === 'CRITICAL').length,
+    warning:  todayItems.filter(i => i.severity === 'WARNING').length,
+  }
+  const weekCritical = weekItems.filter(i => i.severity === 'CRITICAL')
+
+  // 5 most-recent CRITICAL recordings for the monitoring-team feed
+  const recentCriticals = [...allItems]
+    .filter(i => i.severity === 'CRITICAL')
+    .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))
+    .slice(0, 5)
+
   const watcherRunning = watcher?.enabled
   const inFlight = watcher?.counters?.in_flight || 0
 
@@ -336,6 +355,103 @@ export default function Dashboard() {
           value={last30Days.toLocaleString()}
           sub={`avg score ${avgScore}/100`}
           color="#A78BFA"/>
+      </div>
+
+      {/* ── Today focus + Recent CRITICAL feed ────────────────────────────── */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1.4fr',
+        gap:'16px', marginBottom:'16px' }}>
+
+        {/* TODAY focus strip */}
+        <div style={{ ...CARD_STYLE, padding:'18px 20px' }}>
+          <div style={{ display:'flex', justifyContent:'space-between',
+            alignItems:'center', marginBottom:'12px' }}>
+            <span style={SECTION_LABEL}>Today's Activity</span>
+            <span style={{ fontSize:'10px', color:'#94A3B8', fontWeight:600 }}>
+              {today.toLocaleDateString(undefined, { weekday:'short', day:'numeric', month:'short' })}
+            </span>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)',
+            gap:'10px' }}>
+            <TodayTile label="Recordings"  val={todayStats.total}    color="#60A5FA"/>
+            <TodayTile label="Critical"    val={todayStats.critical} color="#F87171"/>
+            <TodayTile label="Warning"     val={todayStats.warning}  color="#FBBF24"/>
+          </div>
+          <div style={{ marginTop:'14px', padding:'10px 12px',
+            borderRadius:'9px',
+            background: weekCritical.length > 0
+              ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)',
+            border: weekCritical.length > 0
+              ? '1px solid rgba(239,68,68,0.30)' : '1px solid rgba(16,185,129,0.30)',
+            display:'flex', alignItems:'center', gap:'10px' }}>
+            <span style={{ fontSize:'16px' }}>
+              {weekCritical.length > 0 ? '🚨' : '✓'}
+            </span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:'11px', fontWeight:800,
+                color: weekCritical.length > 0 ? '#FCA5A5' : '#34D399',
+                letterSpacing:'0.06em', textTransform:'uppercase' }}>
+                This Week
+              </div>
+              <div style={{ fontSize:'13px', color:'#F1F5F9',
+                fontWeight:600, marginTop:'2px' }}>
+                {weekCritical.length} CRITICAL{' '}
+                <span style={{ color:'#64748B', fontWeight:500 }}>
+                  · {weekItems.length} total recordings
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent CRITICAL incidents feed (monitoring-team focus) */}
+        <div style={CARD_STYLE}>
+          <div style={{ display:'flex', justifyContent:'space-between',
+            alignItems:'center', marginBottom:'12px' }}>
+            <span style={SECTION_LABEL}>Recent Critical Incidents</span>
+            <a href="#/alerts" style={{
+              fontSize:'11px', color:'#EF4444', fontWeight:700,
+              textDecoration:'none', padding:'4px 10px', borderRadius:'7px',
+              background:'rgba(239,68,68,0.08)',
+              border:'1px solid rgba(239,68,68,0.25)' }}>
+              Open Alert Center →
+            </a>
+          </div>
+          {recentCriticals.length === 0 ? (
+            <div style={{ textAlign:'center', padding:'34px 0',
+              color:'#34D399', fontSize:'13px' }}>
+              ✓ No CRITICAL incidents — system is clean.
+            </div>
+          ) : (
+            recentCriticals.map(it => (
+              <a key={it.id} href={`#/alerts`} style={{
+                display:'flex', alignItems:'center', gap:'12px',
+                padding:'9px 12px', marginBottom:'5px', borderRadius:'9px',
+                background:'rgba(239,68,68,0.05)',
+                border:'1px solid rgba(239,68,68,0.20)',
+                borderLeft:'3px solid #EF4444',
+                textDecoration:'none', transition:'all .15s' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.10)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.05)'}>
+                <span style={{ fontSize:'14px', fontWeight:900, color:'#EF4444',
+                  width:'36px', textAlign:'center',
+                  fontVariantNumeric:'tabular-nums' }}>{it.score}</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:'12px', color:'#F1F5F9',
+                    fontWeight:700, overflow:'hidden',
+                    textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {it.filename}
+                  </div>
+                  <div style={{ fontSize:'10px', color:'#94A3B8',
+                    marginTop:'2px' }}>
+                    {it.officerId} · {it.toneLabel || 'UNKNOWN'} · {it.violationCount} violations · {formatAgo(it.uploadedAt)}
+                  </div>
+                </div>
+                <span style={{ fontSize:'10px', color:'#F87171',
+                  fontWeight:700 }}>→</span>
+              </a>
+            ))
+          )}
+        </div>
       </div>
 
       {/* ── Charts row 1: severity pie + 7-day trend ──────────────────────── */}
@@ -556,6 +672,21 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// Compact tile inside the Today's Activity card
+function TodayTile({ label, val, color }) {
+  return (
+    <div style={{ padding:'12px 14px', borderRadius:'10px',
+      background:`linear-gradient(135deg, ${color}12, rgba(255,255,255,0.02))`,
+      border:`1px solid ${color}30` }}>
+      <div style={{ fontSize:'9px', color:'#64748B', fontWeight:800,
+        letterSpacing:'0.10em', textTransform:'uppercase' }}>{label}</div>
+      <div style={{ fontSize:'22px', fontWeight:900, color,
+        marginTop:'3px', lineHeight:1, letterSpacing:'-0.02em',
+        fontVariantNumeric:'tabular-nums' }}>{val}</div>
     </div>
   )
 }

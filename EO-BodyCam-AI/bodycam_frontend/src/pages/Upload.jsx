@@ -9,7 +9,7 @@ const LABEL = { fontSize:'10px', color:'#64748B', textTransform:'uppercase', let
 const OFFICERS = [
   { id:'EO_001', name:'Irfan Ali — PK-LHR-001' },
   { id:'EO_002', name:'Umar Farooq — PK-LHR-002' },
-  { id:'EO_003', name:'Fatima Malik — PK-KHI-001' },
+   { id: 'EO_003', name: 'Ahmad Malik — PK-LHR-003' },
 ]
 
 // Pipeline stages reflected on the server side, in execution order. Once the

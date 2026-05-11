@@ -108,7 +108,7 @@ print(f"Keywords: {kw_total} Urdu words in {len(VK)} categories", flush=True)
 OFFICERS = {
     "EO_001": {"name": "Irfan Ali",     "badge": "PK-LHR-001", "enrolled": True,  "area": "Lahore - Modal Town"},
     "EO_002": {"name": "Umar Farooq",   "badge": "PK-LHR-002", "enrolled": False, "area": "Lahore - Model Town"},
-    "EO_003": {"name": "Fatima Malik",   "badge": "PK-KHI-001", "enrolled": False, "area": "Karachi - Saddar"},
+    "EO_003": {"name": "Ahmad Malik",   "badge": "PK-LHR-003", "enrolled": False, "area": "Lahore - Model Town"},
 }
 INCIDENTS = []
 

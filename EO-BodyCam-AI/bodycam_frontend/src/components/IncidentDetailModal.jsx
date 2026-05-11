@@ -900,7 +900,7 @@ function Operator({ children }) {
 // ── Severity Counts (CRITICAL / HIGH / MEDIUM / LOW) ──────────────
 // Comes from rawJson.severity_counts. Useful at-a-glance breakdown
 // of how the violations stack up by severity tier.
-function SeverityCountsPanel({ r, an }) {
+function SeverityCountsPanel({ r, an, suppressed = false }) {
   const counts = r.severity_counts || {}
   const total = counts.TOTAL ?? null
   if (total == null && !an.criticalCount && !an.highCount && !an.mediumCount) {
@@ -915,10 +915,14 @@ function SeverityCountsPanel({ r, an }) {
   const max = Math.max(1, ...tiers.map(t => t.val))
 
   return (
-    <PanelCard title="Severity Distribution"
-      subtitle={`${total ?? tiers.reduce((a, t) => a + t.val, 0)} total violations across 4 tiers`}>
+    <PanelCard title={suppressed
+        ? 'Severity Distribution (heuristic — suppressed)'
+        : 'Severity Distribution'}
+      subtitle={suppressed
+        ? 'Heuristic findings · final severity overridden by Gemini'
+        : `${total ?? tiers.reduce((a, t) => a + t.val, 0)} total violations across 4 tiers`}>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)',
-        gap:'10px' }}>
+        gap:'10px', opacity: suppressed ? 0.55 : 1 }}>
         {tiers.map(t => (
           <div key={t.key} style={{ padding:'14px 14px',
             borderRadius:'12px',
@@ -928,7 +932,10 @@ function SeverityCountsPanel({ r, an }) {
               letterSpacing:'0.10em', textTransform:'uppercase' }}>{t.key}</div>
             <div style={{ fontSize:'24px', fontWeight:900, color:t.color,
               marginTop:'4px', letterSpacing:'-0.02em',
-              fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{t.val}</div>
+              fontVariantNumeric:'tabular-nums', lineHeight:1,
+              textDecoration: suppressed ? 'line-through' : 'none',
+              textDecorationColor: suppressed ? 'rgba(167,139,250,0.55)' : undefined,
+              textDecorationThickness: suppressed ? '2px' : undefined }}>{t.val}</div>
             <div style={{ height:'4px', borderRadius:'2px',
               background:'rgba(255,255,255,0.05)', marginTop:'8px',
               overflow:'hidden' }}>
@@ -1080,7 +1087,10 @@ function describeEngine(method) {
 }
 
 // ── Violations grouped by category ────────────────────────────────
-function ViolationsPanel({ violations }) {
+// When `suppressed` is true, every violation is rendered in a muted /
+// crossed-out style with a "suppressed by Gemini" badge — the final
+// severity ignored these heuristic findings.
+function ViolationsPanel({ violations, suppressed = false }) {
   if (!violations.length) {
     return (
       <PanelCard title="Violations" subtitle="0 detected">
@@ -1102,7 +1112,10 @@ function ViolationsPanel({ violations }) {
   const types = Object.keys(byType).sort((a, b) => byType[b].length - byType[a].length)
 
   return (
-    <PanelCard title="Violations" subtitle={`${violations.length} detected`}>
+    <PanelCard title={suppressed ? 'Violations (suppressed by Gemini)' : 'Violations'}
+      subtitle={suppressed
+        ? `${violations.length} heuristic finding${violations.length === 1 ? '' : 's'} · final severity unaffected — kept for audit`
+        : `${violations.length} detected`}>
       {/* Category chip row */}
       <div style={{ display:'flex', gap:'8px', flexWrap:'wrap',
         marginBottom:'14px' }}>
@@ -1133,9 +1146,22 @@ function ViolationsPanel({ violations }) {
         const impact = num(v.impact_percent)
         return (
           <div key={v.id || i} style={{ padding:'14px 16px', marginBottom:'10px',
-            borderRadius:'12px', background:'rgba(0,0,0,0.22)',
-            border:`1px solid ${vsev.border}`,
-            borderLeft:`4px solid ${meta.color}` }}>
+            borderRadius:'12px',
+            background: suppressed ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.22)',
+            border:`1px solid ${suppressed ? '#1F2937' : vsev.border}`,
+            borderLeft:`4px solid ${suppressed ? '#475569' : meta.color}`,
+            opacity: suppressed ? 0.62 : 1,
+            position:'relative' }}>
+            {suppressed && (
+              <span style={{ position:'absolute', top:'10px', right:'14px',
+                fontSize:'9px', fontWeight:800, padding:'3px 9px',
+                borderRadius:'5px', letterSpacing:'0.08em',
+                textTransform:'uppercase',
+                color:'#A78BFA', background:'rgba(167,139,250,0.10)',
+                border:'1px solid rgba(167,139,250,0.30)' }}>
+                ✦ Suppressed by Gemini
+              </span>
+            )}
             <div style={{ display:'flex', alignItems:'center', gap:'10px',
               marginBottom:'6px', flexWrap:'wrap' }}>
               <span style={{ fontSize:'15px', color: meta.color,

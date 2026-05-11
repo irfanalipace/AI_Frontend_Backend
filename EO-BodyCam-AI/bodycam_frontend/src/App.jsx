@@ -9,6 +9,7 @@ import LiveStream    from './pages/LiveStream'
 import Incidents     from './pages/Incidents'
 import Samples       from './pages/Samples'
 import Officers      from './pages/Officers'
+import AlertCenter   from './pages/AlertCenter'
 import ApiService    from './services/api'
 
 // ──────────────────────────────────────────────────────────────────
@@ -19,6 +20,7 @@ const NAV_GROUPS = [
     title: 'Monitoring',
     items: [
       { to:'/',               label:'Dashboard',      icon:'dashboard'  },
+      { to:'/alerts',         label:'Alert Center',   icon:'bell',  badge:'alerts' },
       { to:'/video-analysis', label:'Video Analysis', icon:'video'      },
       { to:'/live',           label:'Live Stream',    icon:'broadcast', live:true },
     ],
@@ -35,7 +37,7 @@ const NAV_GROUPS = [
     items: [
       { to:'/incidents', label:'Incidents',    icon:'flag'    },
       { to:'/officers',  label:'Officers',     icon:'users'   },
-      { to:'/samples',   label:'Test Samples', icon:'archive' },
+      // { to:'/samples',   label:'Test Samples', icon:'archive' },
     ],
   },
 ]
@@ -164,6 +166,17 @@ export default function App() {
                         textAlign:'center',
                         boxShadow:'0 2px 6px rgba(239,68,68,0.40)' }}>{unread}</span>
                     )}
+                    {item.label === 'Alert Center' && (dotnetStats?.critical ?? 0) > 0 && (
+                      <span style={{
+                        background:'linear-gradient(135deg, #EF4444, #DC2626)',
+                        color:'#fff', fontSize:'10px', fontWeight:800,
+                        padding:'1px 7px', borderRadius:'8px', minWidth:'18px',
+                        textAlign:'center',
+                        boxShadow:'0 2px 6px rgba(239,68,68,0.40)',
+                        animation:'liveGlow 2s infinite' }}>
+                        {dotnetStats.critical}
+                      </span>
+                    )}
                     {item.label === 'Live Stream' && liveStatus && (
                       <span style={{ background:'rgba(239,68,68,0.18)',
                         color:'#EF4444', fontSize:'9px', fontWeight:800,
@@ -223,6 +236,7 @@ export default function App() {
             <Route path="/video-analysis" element={<VideoAnalysis />} />
             <Route path="/live"           element={<LiveStream liveStatus={liveStatus} />} />
             <Route path="/samples"        element={<Samples />} />
+            <Route path="/alerts"         element={<AlertCenter alerts={alerts} markRead={markRead} />} />
             <Route path="/incidents"      element={<Incidents alerts={alerts} markRead={markRead} clearAlerts={clearAlerts} />} />
             <Route path="/officers"       element={<Officers />} />
           </Routes>
@@ -332,6 +346,14 @@ function Icon({ name, size = 18 }) {
           <rect x="3" y="4" width="18" height="4" rx="1.5"/>
           <path d="M5 8v11a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V8"/>
           <path d="M10 12h4"/>
+        </svg>
+      )
+    case 'bell':
+      return (
+        <svg {...common}>
+          <path d="M6 16V10a6 6 0 1 1 12 0v6"/>
+          <path d="M4.5 16h15"/>
+          <path d="M10 19a2 2 0 0 0 4 0"/>
         </svg>
       )
     default:

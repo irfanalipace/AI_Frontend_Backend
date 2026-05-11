@@ -1,0 +1,77 @@
+# ═══════════════════════════════════════════════════════════════
+# Root .gitignore — safety net across the whole monorepo.
+#
+# Sub-folders (bodycam_dotnet/, EO-BodyCam-AI/, deploy/) each have
+# their own .gitignore for stack-specific patterns. This root file
+# is a belt-and-suspenders catch-all so no secret can slip in even
+# if a sub-folder ignore is edited or removed.
+# ═══════════════════════════════════════════════════════════════
+
+# ── Secrets — NEVER commit these ────────────────────────────────
+# .env files anywhere
+**/.env
+**/.env.*
+**/.env.local
+**/.env.development
+**/.env.production
+# but DO allow committed templates
+!**/.env.example
+!**/.env.template
+
+# appsettings.json anywhere (real one has Gemini key + DB connection)
+**/appsettings.json
+**/appsettings.Local.json
+**/appsettings.local.json
+**/appsettings.*.local.json
+# allow committed templates
+!**/appsettings.Example.json
+!**/appsettings.json.example
+
+# Common secret-bearing files
+**/secrets.json
+**/secrets.*.json
+**/credentials.json
+**/credentials.*.json
+**/*.pem
+**/*.key
+**/*.pfx
+**/serviceAccount*.json
+**/gcloud-key*.json
+**/google-services.json
+
+# Cloud / CI tokens that sometimes get dropped in folders
+**/.aws/credentials
+**/.azure/
+**/.gcloud/
+**/firebase-debug.log
+
+# ── Backups & swap files ────────────────────────────────────────
+*.bak
+*.swp
+*.swo
+*~
+
+# ── Build / dependency artifacts (so we don't accidentally bloat) ─
+# Node
+**/node_modules/
+**/dist/
+**/.vite/
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/venv/
+
+# .NET
+**/bin/
+**/obj/
+
+# IDE
+.vs/
+.idea/
+.vscode/
+
+# Logs
+**/*.log
+**/logs/
